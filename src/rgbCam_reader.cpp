@@ -2,43 +2,12 @@
 #include <yarp/os/Network.h>
 #include <yarp/sig/Image.h>
 
+#include <cstddef>
 #include <iostream>
-#include <mutex>
 #include <string>
-#include <thread>
 
-std::mutex outputMutex;
-
-void readCamera(
-    yarp::os::BufferedPort<yarp::sig::ImageOf<yarp::sig::PixelRgb>>& port,
-    const std::string& cameraName)
+int main()
 {
-    std::size_t frameCount = 0;
-
-    while (true) {
-        auto* image = port.read(true);
-
-        if (image == nullptr) {
-            break;
-        }
-
-        frameCount++;
-
-        // Avoid printing once per frame.
-        if (frameCount % 30 != 0) {
-            continue;
-        }
-
-        std::scoped_lock lock(outputMutex);
-
-        std::cout << cameraName
-                  << ": received frame "
-                  << image->width() << "x" << image->height()
-                  << " - total frames: " << frameCount << '\n';
-    }
-}
-
-int main() {
     yarp::os::Network yarp;
 
     if (!yarp::os::Network::checkNetwork(2.0)) {
@@ -46,33 +15,38 @@ int main() {
         return 1;
     }
 
-    yarp::os::BufferedPort<yarp::sig::ImageOf<yarp::sig::PixelRgb>> leftPort;
-    yarp::os::BufferedPort<yarp::sig::ImageOf<yarp::sig::PixelRgb>> rightPort;
+    using RgbImage = yarp::sig::ImageOf<yarp::sig::PixelRgb>;
 
-    const std::string leftPortName = "/primi-ball-balance/rgbCam/left:i";
-    const std::string rightPortName = "/primi-ball-balance/rgbCam/right:i";
+    yarp::os::BufferedPort<RgbImage> rgbPort;
+    const std::string rgbPortName = "/primi-ball-balance/rgbCam:i";
 
-    if (!leftPort.open(leftPortName)) {
-        std::cerr << "Could not open " << leftPortName << '\n';
+    if (!rgbPort.open(rgbPortName)) {
+        std::cerr << "Could not open " << rgbPortName << '\n';
         return 1;
     }
 
-    if (!rightPort.open(rightPortName)) {
-        std::cerr << "Could not open " << rightPortName << '\n';
-        leftPort.close();
-        return 1;
+    std::cout << "Waiting for the RGB stream on "
+              << rgbPortName << ".\n";
+
+    std::size_t frameCount = 0;
+
+    while (true) {
+        RgbImage* image = rgbPort.read(true);
+
+        if (image == nullptr) {
+            break;
+        }
+
+        ++frameCount;
+
+        // Avoid printing once per frame.
+        if (frameCount % 30 == 0) {
+            std::cout << "RGB: received frame "
+                      << image->width() << 'x' << image->height()
+                      << " - total frames: " << frameCount << '\n';
+        }
     }
 
-    std::cout << "Waiting for left and right RGB camera streams.\n";
-
-    std::thread leftThread(readCamera, std::ref(leftPort), "left");
-    std::thread rightThread(readCamera, std::ref(rightPort), "right");
-
-    leftThread.join();
-    rightThread.join();
-
-    leftPort.close();
-    rightPort.close();
-
+    rgbPort.close();
     return 0;
 }
