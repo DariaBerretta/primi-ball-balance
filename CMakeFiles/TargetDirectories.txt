@@ -1,4 +1,0 @@
-/home/icub/robot-code/primi-ball-balance/CMakeFiles/eventCam_reader.dir
-/home/icub/robot-code/primi-ball-balance/CMakeFiles/rgbCam_reader.dir
-/home/icub/robot-code/primi-ball-balance/CMakeFiles/edit_cache.dir
-/home/icub/robot-code/primi-ball-balance/CMakeFiles/rebuild_cache.dir
