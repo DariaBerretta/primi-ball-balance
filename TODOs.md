@@ -11,3 +11,4 @@ CHANGE THIS AS YOU DEEM FIT
 
 >[!NOTE]
 > - The zynqGrabber.ini file is on the icub-ultrascale in ~/.local/share/yarp/cluster.
+> - rgb /home/icub/yarp-device-ultrapython/ini/hiultra.ini

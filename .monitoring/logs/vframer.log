@@ -1,0 +1,11 @@
+[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[34m/vFramer/1785404455/AE:i[00m| Port /vFramer/1785404455/AE:i active at tcp://10.0.0.189:10235/
+[[01;34mINFO[00m] |[01;34myarp.os.impl.PortCoreInputUnit[00m|[34m/vFramer/1785404455/AE:i[00m| Receiving input from /primi-ball-balance/eventCam/left:i to /vFramer/1785404455/AE:i using fast_tcp
+[[01;34mINFO[00m] Drawing grey from /primi-ball-balance/eventCam/left:i
+[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[31m/vFramer/1785404456/AE:i[00m| Port /vFramer/1785404456/AE:i active at tcp://10.0.0.189:10236/
+[[01;34mINFO[00m] |[01;34myarp.os.impl.PortCoreInputUnit[00m|[31m/vFramer/1785404456/AE:i[00m| Receiving input from /primi-ball-balance/eventCam/right:i to /vFramer/1785404456/AE:i using fast_tcp
+[[01;34mINFO[00m] Drawing grey from /primi-ball-balance/eventCam/right:i
+[[01;34mINFO[00m] Starting publishers
+[[01;34mINFO[00m] Configure done
+[[01;34mINFO[00m] |[01;32myarp.os.RFModule[00m| [try 1 of 3] Trying to shut down.
+[[01;34mINFO[00m] |[01;32myarp.os.RFModule[00m| RFModule closing.
+[[01;34mINFO[00m] |[01;32myarp.os.RFModule[00m| RFModule finished.

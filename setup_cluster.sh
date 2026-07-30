@@ -68,6 +68,8 @@ for node in icub-head icub-ultrascale iiticublap267; do     # -optional- iiticub
     fi
 done
 
+sleep 2
+
 echo "Started yarprobotinterface on icub-head and start_clock on icub-ultrascale."
 yarp run --on /icub-head --as yarprobotinterface --cmd "yarprobotinterface"
 yarp run --on /icub-ultrascale --as start_clock --cmd "/home/icub/start_clock.sh"

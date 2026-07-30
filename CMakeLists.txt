@@ -12,6 +12,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
 find_package(Threads REQUIRED)
 
 #============ Shared Image Preprocessing ============
+
 add_library(image_preprocessing
     src/ImagePreprocessor.cpp
 )
@@ -25,6 +26,7 @@ target_link_libraries(image_preprocessing PUBLIC
 )
 
 #============ Ball Detection ============
+
 add_library(ball_detection
     src/BallDetector.cpp
 )
@@ -39,6 +41,7 @@ target_link_libraries(ball_detection PUBLIC
 )
 
 #============ Event Camera Reader ============
+
 add_executable(eventCam_reader
     src/eventCam_reader.cpp
 )
@@ -51,12 +54,13 @@ target_link_libraries(eventCam_reader PRIVATE
 )
 
 #============ RGB Camera Reader ============
+
 add_executable(rgbCam_reader
     src/rgbCam_reader.cpp
 )
 
 target_link_libraries(rgbCam_reader PRIVATE
-    image_preprocessing
+    ball_detection
     YARP::YARP_os
     YARP::YARP_sig
     YARP::YARP_init
@@ -64,6 +68,7 @@ target_link_libraries(rgbCam_reader PRIVATE
 )
 
 #============ Touch Reader ============
+
 add_executable(touch_reader
     src/Touch_reader.cpp
 )
@@ -76,6 +81,7 @@ target_link_libraries(touch_reader PRIVATE
 )
 
 #============ Proprioception Reader ============
+
 add_executable(proprio_reader
     src/Proprio_reader.cpp
 )
@@ -89,6 +95,7 @@ target_link_libraries(proprio_reader PRIVATE
 )
 
 #============ Ball Balance Controller ============
+
 add_executable(Robot_control
     src/Robot_control.cpp
 )
@@ -102,6 +109,7 @@ target_link_libraries(Robot_control PRIVATE
 )
 
 #============ Image Preprocessor Test ============
+
 add_executable(test_preprocessor
     src/test_preprocessor.cpp
 )
@@ -111,6 +119,7 @@ target_link_libraries(test_preprocessor PRIVATE
 )
 
 #============ Ball Detector Test ============
+
 add_executable(test_ball_detector
     src/test_ball_detector.cpp
 )
