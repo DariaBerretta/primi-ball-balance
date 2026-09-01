@@ -1,0 +1,10 @@
+icub@iiticublap267:~/robot-code/primi-ball-balance/build$ ctpService --robot icub --part left_arm
+[ERROR] |yarp.os.Port|/ctpservice/left_arm/rpc| Port /ctpservice/left_arm/rpc failed to activate at tcp://10.0.0.189:10098/ (address conflict)
+Driver options:
+(device remote_controlboard) (local "/ctpservice/local/left_arm") (remote "/icub/left_arm")[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/ctpservice/local/left_arm") (remote "/icub/left_arm")
+[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/rpc:o| Port /ctpservice/local/left_arm/rpc:o failed to activate at tcp://10.0.0.189:10102/ (address conflict)
+[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/command:o| Port /ctpservice/local/left_arm/command:o failed to activate at tcp://10.0.0.189:10104/ (address conflict)
+[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/stateExt:i| Port /ctpservice/local/left_arm/stateExt:i failed to activate at tcp://10.0.0.189:10105/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+Error cannot connect to remote ports
+[INFO] |yarp.os.RFModule| RFModule failed to open.
