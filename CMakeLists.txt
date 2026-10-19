@@ -10,6 +10,7 @@ find_package(YARP REQUIRED COMPONENTS os sig dev)
 find_package(event-driven REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
 find_package(Threads REQUIRED)
+find_package(ICUB REQUIRED)
 
 #============ Shared Image Preprocessing ============
 
@@ -108,6 +109,20 @@ target_link_libraries(Robot_control PRIVATE
     Threads::Threads
 )
 
+#============ Robot Control cartesian ============
+
+add_executable(Robot_control_cartesian
+    src/Robot_control_cartesian.cpp
+)
+
+target_link_libraries(Robot_control_cartesian PRIVATE
+    YARP::YARP_os
+    YARP::YARP_sig
+    YARP::YARP_init
+    YARP::YARP_dev
+    Threads::Threads
+)
+
 #============ Image Preprocessor Test ============
 
 add_executable(test_preprocessor
@@ -126,4 +141,23 @@ add_executable(test_ball_detector
 
 target_link_libraries(test_ball_detector PRIVATE
     ball_detection
+)
+
+#============ Joint to XYZ Test ============
+
+add_executable(joint_to_xyz
+    src/joint_to_xyz.cpp
+)
+
+target_link_directories(joint_to_xyz PRIVATE
+    ${ICUB_LINK_DIRECTORIES}
+)
+
+target_link_libraries(joint_to_xyz PRIVATE
+    YARP::YARP_os
+    YARP::YARP_sig
+    YARP::YARP_init
+    iKin
+    ctrlLib
+    Threads::Threads
 )

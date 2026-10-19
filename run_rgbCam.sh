@@ -4,23 +4,42 @@ set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-#============ Local RGB reader ============
-
 READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/rgbCam_reader}"
 LOCAL_INPUT_PORT="${LOCAL_INPUT_PORT:-/primi-ball-balance/rgbCam/stereo:i}"
 CAMERA_OUTPUT_PORT="${CAMERA_OUTPUT_PORT:-/grabber}"
-CARRIER="${CARRIER:-tcp}"
+CAMERA_RPC_PORT="${CAMERA_RPC_PORT:-${CAMERA_OUTPUT_PORT}/rpc}"
+CARRIER="${CARRIER:-fast_tcp}"
 
-#============ Remote RGB camera ============
+LEFT_RAW_OUTPUT="${LEFT_RAW_OUTPUT:-/primi-ball-balance/rgbCam/left/raw:o}"
+RIGHT_RAW_OUTPUT="${RIGHT_RAW_OUTPUT:-/primi-ball-balance/rgbCam/right/raw:o}"
+LEFT_PROCESSED_OUTPUT="${LEFT_PROCESSED_OUTPUT:-/primi-ball-balance/rgbCam/left/processed:o}"
+RIGHT_PROCESSED_OUTPUT="${RIGHT_PROCESSED_OUTPUT:-/primi-ball-balance/rgbCam/right/processed:o}"
+LEFT_DETECTION_OUTPUT="${LEFT_DETECTION_OUTPUT:-/primi-ball-balance/rgbCam/left/detection:o}"
+RIGHT_DETECTION_OUTPUT="${RIGHT_DETECTION_OUTPUT:-/primi-ball-balance/rgbCam/right/detection:o}"
 
 REMOTE_RUN_SERVER="${REMOTE_RUN_SERVER:-/icub-ultrascale}"
 REMOTE_COMMAND_TAG="${REMOTE_COMMAND_TAG:-rgbcommand}"
 REMOTE_CAMERA_COMMAND="${REMOTE_CAMERA_COMMAND:-/home/icub/yarp-install/bin/yarpdev --verbose --from /home/icub/yarp-device-ultrapython/ini/hiultra.ini}"
 
+REMOTE_CAMERA_CLI="${REMOTE_CAMERA_CLI:-/home/icub/yarp-device-ultrapython/build/bin/ultrapythoncli}"
+REMOTE_SETTING_TAG_PREFIX="${REMOTE_SETTING_TAG_PREFIX:-rgbsetting}"
+CAMERA_SETTING_DELAY="${CAMERA_SETTING_DELAY:-1.5}"
+
+APPLY_CAMERA_SETTINGS="${APPLY_CAMERA_SETTINGS:-1}"
+CAMERA_EXPOSURE="${CAMERA_EXPOSURE:-25}"
+CAMERA_GAIN="${CAMERA_GAIN:-2}"
+CAMERA_BRIGHTNESS="${CAMERA_BRIGHTNESS:-200}"
+CAMERA_CONTRAST="${CAMERA_CONTRAST:-50}"
+CAMERA_RED_GAIN="${CAMERA_RED_GAIN:-50}"
+CAMERA_GREEN_GAIN="${CAMERA_GREEN_GAIN:-50}"
+CAMERA_BLUE_GAIN="${CAMERA_BLUE_GAIN:-50}"
+
 CAMERA_WAIT_SECONDS="${CAMERA_WAIT_SECONDS:-60}"
 READER_WAIT_SECONDS="${READER_WAIT_SECONDS:-15}"
+STOP_REMOTE_CAMERA_ON_EXIT="${STOP_REMOTE_CAMERA_ON_EXIT:-1}"
 
 READER_PID=""
+REMOTE_CAMERA_STARTED=0
 CLEANUP_DONE=0
 
 log()
@@ -53,6 +72,11 @@ wait_for_port()
             return 0
         fi
 
+        if [[ -n "$READER_PID" ]] && ! kill -0 "$READER_PID" 2>/dev/null; then
+            error "The local RGB reader exited while waiting for ${port_name}."
+            return 1
+        fi
+
         sleep 0.2
     done
 
@@ -79,11 +103,47 @@ stop_remote_camera()
 
 unregister_port()
 {
-    local port_name="$1"
+    yarp name unregister "$1" >/dev/null 2>&1 || true
+}
 
-    if port_exists "$port_name"; then
-        yarp name unregister "$port_name" >/dev/null 2>&1 || true
+apply_camera_setting()
+{
+    local label="$1"
+    local code="$2"
+    local value="$3"
+    local tag="${REMOTE_SETTING_TAG_PREFIX}-${code}"
+
+    log "Setting ${label}=${value}"
+
+    unregister_port /xxx
+
+    yarp run --on "$REMOTE_RUN_SERVER" \
+        --sigterm "$tag" >/dev/null 2>&1 || true
+
+    if ! yarp run --on "$REMOTE_RUN_SERVER" \
+        --as "$tag" \
+        --cmd "$REMOTE_CAMERA_CLI --remote $CAMERA_OUTPUT_PORT --set ${code}=${value}"; then
+        error "Could not launch the command for ${label}."
+        return 1
     fi
+
+    sleep "$CAMERA_SETTING_DELAY"
+    unregister_port /xxx
+}
+
+apply_camera_settings()
+{
+    log "Applying RGB camera settings on ${REMOTE_RUN_SERVER}"
+
+    apply_camera_setting "exposure" 61 "$CAMERA_EXPOSURE"
+    apply_camera_setting "gain" 60 "$CAMERA_GAIN"
+    apply_camera_setting "brightness" 62 "$CAMERA_BRIGHTNESS"
+    apply_camera_setting "contrast" 75 "$CAMERA_CONTRAST"
+    apply_camera_setting "red gain" 63 "$CAMERA_RED_GAIN"
+    apply_camera_setting "green gain" 65 "$CAMERA_GREEN_GAIN"
+    apply_camera_setting "blue gain" 64 "$CAMERA_BLUE_GAIN"
+
+    log "RGB camera settings applied"
 }
 
 cleanup()
@@ -95,32 +155,27 @@ cleanup()
     CLEANUP_DONE=1
     printf '\n'
 
-    if port_exists "$CAMERA_OUTPUT_PORT" &&
-       port_exists "$LOCAL_INPUT_PORT"; then
-        log "Disconnecting ${CAMERA_OUTPUT_PORT} from ${LOCAL_INPUT_PORT}"
-        yarp disconnect "$CAMERA_OUTPUT_PORT" "$LOCAL_INPUT_PORT" \
-            >/dev/null 2>&1 || true
-    fi
+    yarp disconnect "$CAMERA_OUTPUT_PORT" "$LOCAL_INPUT_PORT" \
+        >/dev/null 2>&1 || true
 
     log "Stopping local RGB reader"
     stop_local_reader
 
-    log "Stopping remote RGB camera"
-    stop_remote_camera
+    if (( REMOTE_CAMERA_STARTED )) &&
+       [[ "$STOP_REMOTE_CAMERA_ON_EXIT" == "1" ]]; then
+        log "Stopping remote RGB camera"
+        stop_remote_camera
+    fi
 }
 
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-#============ Preflight checks ============
-
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
     exit 1
 fi
-
-log "YARP network is available"
 
 if [[ ! -x "$READER_EXECUTABLE" ]]; then
     error "RGB reader executable not found: $READER_EXECUTABLE"
@@ -130,73 +185,88 @@ fi
 
 if ! port_exists "$REMOTE_RUN_SERVER"; then
     error "YARP run server is not available: $REMOTE_RUN_SERVER"
-    error "Start yarp run --server $REMOTE_RUN_SERVER on the Ultrascale."
     exit 1
 fi
 
-#============ Stop previous pipeline ============
-
 log "Stopping previous RGB processes"
-
 stop_local_reader
 stop_remote_camera
 
-sleep 1
-
-#============ Remove stale port registrations ============
-
-log "Removing previous RGB port registrations"
-
+log "Removing stale RGB port registrations"
 unregister_port "$CAMERA_OUTPUT_PORT"
+unregister_port "$CAMERA_RPC_PORT"
 unregister_port "$LOCAL_INPUT_PORT"
+unregister_port "$LEFT_RAW_OUTPUT"
+unregister_port "$RIGHT_RAW_OUTPUT"
+unregister_port "$LEFT_PROCESSED_OUTPUT"
+unregister_port "$RIGHT_PROCESSED_OUTPUT"
+unregister_port "$LEFT_DETECTION_OUTPUT"
+unregister_port "$RIGHT_DETECTION_OUTPUT"
+unregister_port /xxx
 
 sleep 1
-
-#============ Start remote camera ============
 
 log "Starting RGB camera on ${REMOTE_RUN_SERVER}"
 
 if ! yarp run --on "$REMOTE_RUN_SERVER" \
     --as "$REMOTE_COMMAND_TAG" \
     --cmd "$REMOTE_CAMERA_COMMAND"; then
-    error "Could not start the remote RGB camera command."
+    error "Could not start the remote RGB camera."
     exit 1
 fi
 
-if ! wait_for_port "$CAMERA_OUTPUT_PORT" "$CAMERA_WAIT_SECONDS" \
-    "RGB camera output"; then
-    exit 1
+REMOTE_CAMERA_STARTED=1
+
+wait_for_port "$CAMERA_OUTPUT_PORT" "$CAMERA_WAIT_SECONDS" \
+    "RGB camera output"
+
+wait_for_port "$CAMERA_RPC_PORT" "$CAMERA_WAIT_SECONDS" \
+    "RGB camera RPC"
+
+if [[ "$APPLY_CAMERA_SETTINGS" == "1" ]]; then
+    apply_camera_settings
 fi
 
-#============ Start local RGB reader ============
-
-log "Starting local RGB reader: ${READER_EXECUTABLE}"
-
+log "Starting local RGB reader"
 "$READER_EXECUTABLE" &
 READER_PID=$!
 
-if ! wait_for_port "$LOCAL_INPUT_PORT" "$READER_WAIT_SECONDS" \
-    "local RGB reader input"; then
-    if ! kill -0 "$READER_PID" 2>/dev/null; then
-        error "rgbCam_reader exited before opening ${LOCAL_INPUT_PORT}."
-    fi
-
-    exit 1
-fi
-
-#============ Connect pipeline ============
+wait_for_port "$LOCAL_INPUT_PORT" "$READER_WAIT_SECONDS" \
+    "local RGB reader input"
+wait_for_port "$LEFT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
+    "left raw RGB output"
+wait_for_port "$RIGHT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
+    "right raw RGB output"
+wait_for_port "$LEFT_PROCESSED_OUTPUT" "$READER_WAIT_SECONDS" \
+    "left processed RGB output"
+wait_for_port "$RIGHT_PROCESSED_OUTPUT" "$READER_WAIT_SECONDS" \
+    "right processed RGB output"
+wait_for_port "$LEFT_DETECTION_OUTPUT" "$READER_WAIT_SECONDS" \
+    "left RGB detection output"
+wait_for_port "$RIGHT_DETECTION_OUTPUT" "$READER_WAIT_SECONDS" \
+    "right RGB detection output"
 
 log "Connecting ${CAMERA_OUTPUT_PORT} -> ${LOCAL_INPUT_PORT} using ${CARRIER}"
 
 if ! yarp connect "$CAMERA_OUTPUT_PORT" "$LOCAL_INPUT_PORT" "$CARRIER"; then
-    error "Could not connect the RGB camera to rgbCam_reader."
-    error "Try manually:"
-    error "  yarp connect ${CAMERA_OUTPUT_PORT} ${LOCAL_INPUT_PORT} ${CARRIER}"
+    error "Could not connect the RGB camera to the local reader."
     exit 1
 fi
 
 log "RGB pipeline is running"
-log "${CAMERA_OUTPUT_PORT} -> ${LOCAL_INPUT_PORT}"
+log "Camera settings:"
+log "  exposure:   ${CAMERA_EXPOSURE} ms"
+log "  gain:       ${CAMERA_GAIN}"
+log "  brightness: ${CAMERA_BRIGHTNESS}"
+log "  contrast:   ${CAMERA_CONTRAST}"
+log "  RGB gains:  ${CAMERA_RED_GAIN}/${CAMERA_GREEN_GAIN}/${CAMERA_BLUE_GAIN}"
+log "Local outputs:"
+log "  $LEFT_RAW_OUTPUT"
+log "  $RIGHT_RAW_OUTPUT"
+log "  $LEFT_PROCESSED_OUTPUT"
+log "  $RIGHT_PROCESSED_OUTPUT"
+log "  $LEFT_DETECTION_OUTPUT"
+log "  $RIGHT_DETECTION_OUTPUT"
 log "Press Ctrl+C to stop"
 
 wait "$READER_PID"

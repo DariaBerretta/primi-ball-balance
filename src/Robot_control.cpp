@@ -60,7 +60,7 @@ struct Options
     std::string robot;
 
     // Lookup table generated from the recorded joint angles.
-    std::string lookupFile = "/home/icub/robot-code/primi-ball-balance/lookupTableV2.txt";
+    std::string lookupFile = "/home/icub/robot-code/primi-ball-balance/lookupTableV3.txt";
 
     /*
      * Duration of one COMPLETE oscillation:
@@ -93,7 +93,7 @@ struct Options
      *
      * The remaining joints belong to the hand.
      */
-    int controlledJoints = 16;
+    int controlledJoints = 7;
 
     /*
      * Speed used ONLY to reach INIT before starting

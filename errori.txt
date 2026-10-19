@@ -1,10 +1,138 @@
-icub@iiticublap267:~/robot-code/primi-ball-balance/build$ ctpService --robot icub --part left_arm
-[ERROR] |yarp.os.Port|/ctpservice/left_arm/rpc| Port /ctpservice/left_arm/rpc failed to activate at tcp://10.0.0.189:10098/ (address conflict)
-Driver options:
-(device remote_controlboard) (local "/ctpservice/local/left_arm") (remote "/icub/left_arm")[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/ctpservice/local/left_arm") (remote "/icub/left_arm")
-[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/rpc:o| Port /ctpservice/local/left_arm/rpc:o failed to activate at tcp://10.0.0.189:10102/ (address conflict)
-[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/command:o| Port /ctpservice/local/left_arm/command:o failed to activate at tcp://10.0.0.189:10104/ (address conflict)
-[ERROR] |yarp.os.Port|/ctpservice/local/left_arm/stateExt:i| Port /ctpservice/local/left_arm/stateExt:i failed to activate at tcp://10.0.0.189:10105/ (address conflict)
+-17.8638131440750562717 24.527037419524948092 22.8241524027158249055 33.8983981894487058639 -12.9968579024851127457 -0.0878908395772450556915 -10.2667486981169382432 35.5188855441541591063 26.7352947639032301197 0.0 40.6055678846872183385 3.74634703698007065498 0.834962975983828070703 1.14807409197776344456 25.411438992770975176 60.7490496802970696422
+
+
+-26.2134429039133394213 33.3161213772494519958 6.03700204346201996231 96.7403484871789203225 -12.4969787523895305981 -4.92188701632572289668 52.8333809408714358824 35.5188855441541591063 26.1749906615982936842 0.763551668827316398769 39.0455054821911176077 3.74634703698007065498 0.417481487991914035351 3.44422227593329077777 26.8231856034804749811 86.1879545604359265099
+
+
+
+icub@iiticublap267:~/robot-code/primi-ball-balance$ YARP_ROBOT_NAME=iCubGenova02 \
+> iKinCartesianSolver \
+>     --from /home/icub/robot-code/robotology-superbuild/build/install/share/ICUBcontrib/robots/iCubGenova02/cartesianSolver.ini \
+>     --part right_arm
+[INFO] |yarp.os.Port|/cartesianSolver/right_arm/rpc| Port /cartesianSolver/right_arm/rpc active at tcp://10.0.0.189:10115/
+[INFO] DH Table:  (H0 (0.0 -1.0 0.0 0.0 0.0 0.0 -1.0 0.0 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0)) (HN (1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0)) (link_0 (A 0.0320000000000000006661) (D 0.0) (alpha 90.0) (offset 0.0) (min -22.0) (max 84.0) (blocked 0.0)) (link_1 (A 0.0) (D -0.00549999999999999968081) (alpha 90.0) (offset -90.0) (min -39.0) (max 39.0) (blocked 0.0)) (link_2 (A -0.0233646999999999986641) (D -0.143300000000000010703) (alpha 90.0) (offset -105.000000000000014211) (min -59.0000000000000071054) (max 59.0000000000000071054) (blocked 0.0)) (link_3 (A 0.0) (D -0.107740000000000002434) (alpha 90.0) (offset -90.0) (min -95.5) (max 5.0)) (link_4 (A 0.0) (D 0.0) (alpha -90.0) (offset -90.0) (min 0.0) (max 160.800000000000011369)) (link_5 (A -0.0149999999999999994449) (D -0.152279999999999998694) (alpha -90.0) (offset -105.000000000000014211) (min -37.0) (max 100.0)) (link_6 (A 0.0149999999999999994449) (D 0.0) (alpha 90.0) (offset 0.0) (min 5.5) (max 106.0)) (link_7 (A 0.0) (D -0.141300000000000008926) (alpha 90.0) (offset -90.0) (min -50.0) (max 50.0)) (link_8 (A 0.0) (D 0.0) (alpha 90.0) (offset 90.0) (min -65.0) (max 10.0)) (link_9 (A 0.0625) (D 0.0259799999999999996214) (alpha 0.0) (offset 180.0) (min -25.0) (max 25.0)) (numLinks 10) (type right_v2)
+[INFO] Allocating device driver for torso ...
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
 [ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
-Error cannot connect to remote ports
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 40.0 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 39.0 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 38.0 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 36.9 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 35.9 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 34.8 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 33.8 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 32.8 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 31.7 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 30.7 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 29.7 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 28.6 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 27.6 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 26.5 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 25.5 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 24.5 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 23.4 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 22.4 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 21.3 [s] to timeout expiry
+[DEBUG] |yarp.dev.PolyDriver|remote_controlboard| Parameters are (device remote_controlboard) (local "/cartesianSolver/right_arm/torso") (part torso) (remote "/icub/torso") (robot icub)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/rpc:o| Port /cartesianSolver/right_arm/torso/rpc:o failed to activate at tcp://10.0.0.189:10119/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/command:o| Port /cartesianSolver/right_arm/torso/command:o failed to activate at tcp://10.0.0.189:10120/ (address conflict)
+[ERROR] |yarp.os.Port|/cartesianSolver/right_arm/torso/stateExt:i| Port /cartesianSolver/right_arm/torso/stateExt:i failed to activate at tcp://10.0.0.189:10121/ (address conflict)
+[ERROR] |yarp.dev.PolyDriver|remote_controlboard| Driver <remote_controlboard> was found but could not open
+[INFO] cartesianSolver/right_arm: Checking if torso part is active ... not yet: still 20.3 [s] to timeout expiry
+^C[INFO] |yarp.os.RFModule| [try 1 of 3] Trying to shut down.
+[ERROR] Device driver not available!
+[INFO] cartesianSolver/right_arm closed
 [INFO] |yarp.os.RFModule| RFModule failed to open.

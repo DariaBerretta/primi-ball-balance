@@ -3,7 +3,7 @@
 Loading from command line
 QObject::connect: No such signal QCPAxisRect::zoomRequest()
 QObject::connect: No such signal QCPAxisRect::dragStarted()
-[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[34m/yarpscope[00m| Port /yarpscope active at tcp://10.0.0.189:10186/
+[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[34m/yarpscope[00m| Port /yarpscope active at tcp://10.0.0.189:10246/
 [[01;34mINFO[00m] |[01;36myarp.os.Network[00m| Success: port-to-port persistent connection added.
 Listening to port /primi-ball-balance/rgbCam/left/detection:o from port /yarpscope
 will NOT use real time for port /primi-ball-balance/rgbCam/left/detection:o

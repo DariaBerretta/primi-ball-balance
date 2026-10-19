@@ -2,40 +2,35 @@
 
 set -Eeuo pipefail
 
-# -----------------------------------------------------------------------------
-# Local configuration
-# -----------------------------------------------------------------------------
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/touch_reader}"
+
+LEFT_RAW_PORT="${LEFT_RAW_PORT:-/icub/skin/left_hand}"
+RIGHT_RAW_PORT="${RIGHT_RAW_PORT:-/icub/skin/right_hand}"
+LEFT_COMPENSATED_SOURCE="${LEFT_COMPENSATED_SOURCE:-/icub/skin/left_hand_comp}"
+RIGHT_COMPENSATED_SOURCE="${RIGHT_COMPENSATED_SOURCE:-/icub/skin/right_hand_comp}"
+
+LEFT_LOCAL_INPUT="${LEFT_LOCAL_INPUT:-/primi-ball-balance/skin/left_hand:i}"
+RIGHT_LOCAL_INPUT="${RIGHT_LOCAL_INPUT:-/primi-ball-balance/skin/right_hand:i}"
+LEFT_LOCAL_OUTPUT="${LEFT_LOCAL_OUTPUT:-/primi-ball-balance/skin/left_hand/compensated:o}"
+RIGHT_LOCAL_OUTPUT="${RIGHT_LOCAL_OUTPUT:-/primi-ball-balance/skin/right_hand/compensated:o}"
+
 SKIN_GUI_EXECUTABLE="${SKIN_GUI_EXECUTABLE:-iCubSkinGui}"
 SKIN_GUI_CONFIG="${SKIN_GUI_CONFIG:-right_hand_V2_1.ini}"
-LOCAL_INPUT_PORT="${LOCAL_INPUT_PORT:-/skinGui/right_hand:i}"
-CARRIER="${CARRIER:-tcp}"
+GUI_INPUT_PORT="${GUI_INPUT_PORT:-/skinGui/right_hand:i}"
 
-# -----------------------------------------------------------------------------
-# Skin ports
-# -----------------------------------------------------------------------------
-# The raw port is produced by the robot interface.
-RAW_SKIN_PORT="${RAW_SKIN_PORT:-/icub/skin/right_hand}"
-
-# The compensated port is produced by skinManager.
-SKIN_OUTPUT_PORT="${SKIN_OUTPUT_PORT:-/icub/skin/right_hand_comp}"
-
-# -----------------------------------------------------------------------------
-# Remote skinManager configuration
-# -----------------------------------------------------------------------------
-REMOTE_SERVER="${REMOTE_SERVER:-/icub-head}"
+REMOTE_RUN_SERVER="${REMOTE_RUN_SERVER:-/icub-head}"
 REMOTE_SKINMANAGER_TAG="${REMOTE_SKINMANAGER_TAG:-primi-skinmanager}"
+REMOTE_SKINMANAGER_COMMAND="${REMOTE_SKINMANAGER_COMMAND:-skinManager --from skinManAll.ini --context skinGui --binarization false}"
 
-# skinManAll.ini provides both hand streams. Binarization is disabled so the
-# compensated output retains continuous activation magnitudes.
-REMOTE_SKINMANAGER_CMD="${REMOTE_SKINMANAGER_CMD:-skinManager --from skinManAll.ini --context skinGui --binarization false}"
-
+REMOTE_CARRIER="${REMOTE_CARRIER:-tcp}"
+LOCAL_CARRIER="${LOCAL_CARRIER:-shmem}"
 SKIN_WAIT_SECONDS="${SKIN_WAIT_SECONDS:-60}"
+READER_WAIT_SECONDS="${READER_WAIT_SECONDS:-15}"
 GUI_WAIT_SECONDS="${GUI_WAIT_SECONDS:-15}"
-
-# skinManager is left running by default because other applications may depend
-# on it. Set this to 1 only when this script owns the skinManager process.
 STOP_REMOTE_SKINMANAGER_ON_EXIT="${STOP_REMOTE_SKINMANAGER_ON_EXIT:-0}"
 
+READER_PID=""
 GUI_PID=""
 REMOTE_SKINMANAGER_STARTED=0
 CLEANUP_DONE=0
@@ -43,11 +38,6 @@ CLEANUP_DONE=0
 log()
 {
     printf '[INFO] %s\n' "$*"
-}
-
-warning()
-{
-    printf '[WARNING] %s\n' "$*" >&2
 }
 
 error()
@@ -78,7 +68,38 @@ wait_for_port()
         sleep 0.2
     done
 
+    error "Timed out waiting for ${description}: ${port_name}"
     return 1
+}
+
+stop_local_processes()
+{
+    if [[ -n "$GUI_PID" ]] && kill -0 "$GUI_PID" 2>/dev/null; then
+        kill -TERM "$GUI_PID" 2>/dev/null || true
+        wait "$GUI_PID" 2>/dev/null || true
+    fi
+
+    if [[ -n "$READER_PID" ]] && kill -0 "$READER_PID" 2>/dev/null; then
+        kill -TERM "$READER_PID" 2>/dev/null || true
+        wait "$READER_PID" 2>/dev/null || true
+    fi
+
+    pkill -x touch_reader 2>/dev/null || true
+    pkill -x "$(basename "$SKIN_GUI_EXECUTABLE")" 2>/dev/null || true
+
+    GUI_PID=""
+    READER_PID=""
+}
+
+stop_remote_skinmanager()
+{
+    yarp run --on "$REMOTE_RUN_SERVER" \
+        --sigterm "$REMOTE_SKINMANAGER_TAG" >/dev/null 2>&1 || true
+}
+
+unregister_port()
+{
+    yarp name unregister "$1" >/dev/null 2>&1 || true
 }
 
 cleanup()
@@ -90,23 +111,20 @@ cleanup()
     CLEANUP_DONE=1
     printf '\n'
 
-    if port_exists "$SKIN_OUTPUT_PORT" && port_exists "$LOCAL_INPUT_PORT"; then
-        log "Disconnecting ${SKIN_OUTPUT_PORT} from ${LOCAL_INPUT_PORT}"
-        yarp disconnect "$SKIN_OUTPUT_PORT" "$LOCAL_INPUT_PORT" \
-            >/dev/null 2>&1 || true
-    fi
+    yarp disconnect "$LEFT_COMPENSATED_SOURCE" "$LEFT_LOCAL_INPUT" \
+        >/dev/null 2>&1 || true
+    yarp disconnect "$RIGHT_COMPENSATED_SOURCE" "$RIGHT_LOCAL_INPUT" \
+        >/dev/null 2>&1 || true
+    yarp disconnect "$RIGHT_LOCAL_OUTPUT" "$GUI_INPUT_PORT" \
+        >/dev/null 2>&1 || true
 
-    if [[ -n "$GUI_PID" ]] && kill -0 "$GUI_PID" 2>/dev/null; then
-        log "Stopping local skin GUI (PID ${GUI_PID})"
-        kill -TERM "$GUI_PID" 2>/dev/null || true
-        wait "$GUI_PID" 2>/dev/null || true
-    fi
+    log "Stopping local skin processes"
+    stop_local_processes
 
     if (( REMOTE_SKINMANAGER_STARTED )) &&
        [[ "$STOP_REMOTE_SKINMANAGER_ON_EXIT" == "1" ]]; then
-        log "Stopping skinManager on ${REMOTE_SERVER}"
-        yarp run --on "$REMOTE_SERVER" \
-            --sigterm "$REMOTE_SKINMANAGER_TAG" >/dev/null 2>&1 || true
+        log "Stopping remote skinManager"
+        stop_remote_skinmanager
     fi
 }
 
@@ -114,118 +132,102 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# -----------------------------------------------------------------------------
-# Preliminary checks
-# -----------------------------------------------------------------------------
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
     exit 1
 fi
 
-log "YARP network is available"
-
-if ! port_exists "$REMOTE_SERVER"; then
-    error "The yarprun server is not available: ${REMOTE_SERVER}"
-    error "Run the robot startup script before this script."
+if [[ ! -x "$READER_EXECUTABLE" ]]; then
+    error "Touch reader not found: $READER_EXECUTABLE"
+    error "Build it with: cmake --build \"$PROJECT_DIR/build\" -j\"\$(nproc)\""
     exit 1
 fi
-
-log "Remote yarprun server is available: ${REMOTE_SERVER}"
 
 if ! command -v "$SKIN_GUI_EXECUTABLE" >/dev/null 2>&1; then
-    error "Local executable not found on PATH: ${SKIN_GUI_EXECUTABLE}"
+    error "Skin GUI executable not found: $SKIN_GUI_EXECUTABLE"
     exit 1
 fi
 
-if port_exists "$LOCAL_INPUT_PORT"; then
-    error "The local GUI input port is already open: ${LOCAL_INPUT_PORT}"
-    error "Stop the existing iCubSkinGui process before running this script."
+if ! port_exists "$REMOTE_RUN_SERVER"; then
+    error "YARP run server is not available: $REMOTE_RUN_SERVER"
     exit 1
 fi
 
-if ! port_exists "$RAW_SKIN_PORT"; then
-    error "The raw skin stream is not available: ${RAW_SKIN_PORT}"
-    error "The robot interface and skin boards must be started first."
+if ! port_exists "$LEFT_RAW_PORT" || ! port_exists "$RIGHT_RAW_PORT"; then
+    error "The raw left and right hand skin streams must be available first."
+    error "Missing ports:"
+    port_exists "$LEFT_RAW_PORT" || error "  $LEFT_RAW_PORT"
+    port_exists "$RIGHT_RAW_PORT" || error "  $RIGHT_RAW_PORT"
     exit 1
 fi
 
-log "Raw skin stream is available: ${RAW_SKIN_PORT}"
+log "Stopping previous local skin processes"
+stop_local_processes
 
-# -----------------------------------------------------------------------------
-# Start skinManager when its compensated output is not already available.
-# -----------------------------------------------------------------------------
-if port_exists "$SKIN_OUTPUT_PORT"; then
-    log "Compensated skin output is already available: ${SKIN_OUTPUT_PORT}"
-    warning "The existing skinManager configuration is being reused."
-    warning "This script cannot guarantee that its binarization is disabled."
+log "Removing stale local skin port registrations"
+unregister_port "$LEFT_LOCAL_INPUT"
+unregister_port "$RIGHT_LOCAL_INPUT"
+unregister_port "$LEFT_LOCAL_OUTPUT"
+unregister_port "$RIGHT_LOCAL_OUTPUT"
+unregister_port "$GUI_INPUT_PORT"
+
+sleep 1
+
+if port_exists "$LEFT_COMPENSATED_SOURCE" &&
+   port_exists "$RIGHT_COMPENSATED_SOURCE"; then
+    log "Using the existing compensated skin streams"
+elif port_exists "$LEFT_COMPENSATED_SOURCE" ||
+     port_exists "$RIGHT_COMPENSATED_SOURCE"; then
+    error "Only one compensated hand port is available."
+    error "Stop the stale skinManager instance and run this script again."
+    exit 1
 else
-    log "Starting skinManager on ${REMOTE_SERVER}"
+    log "Starting skinManager on ${REMOTE_RUN_SERVER}"
+    stop_remote_skinmanager
 
-    # Remove a stale yarprun process using the same tag, if one exists.
-    yarp run --on "$REMOTE_SERVER" \
-        --sigterm "$REMOTE_SKINMANAGER_TAG" >/dev/null 2>&1 || true
-
-    if ! yarp run --on "$REMOTE_SERVER" \
+    yarp run --on "$REMOTE_RUN_SERVER" \
         --as "$REMOTE_SKINMANAGER_TAG" \
-        --cmd "$REMOTE_SKINMANAGER_CMD"; then
-        error "Could not start skinManager on ${REMOTE_SERVER}."
-        exit 1
-    fi
+        --cmd "$REMOTE_SKINMANAGER_COMMAND"
 
     REMOTE_SKINMANAGER_STARTED=1
 
-    if ! wait_for_port "$SKIN_OUTPUT_PORT" "$SKIN_WAIT_SECONDS" \
-        "compensated skin output"; then
-        error "Timed out after ${SKIN_WAIT_SECONDS}s waiting for ${SKIN_OUTPUT_PORT}."
-        error "Inspect remote processes with:"
-        error "  yarp run --on ${REMOTE_SERVER} --ps"
-        exit 1
-    fi
+    wait_for_port "$LEFT_COMPENSATED_SOURCE" "$SKIN_WAIT_SECONDS" \
+        "left compensated skin source"
+    wait_for_port "$RIGHT_COMPENSATED_SOURCE" "$SKIN_WAIT_SECONDS" \
+        "right compensated skin source"
 fi
 
-log "Compensated skin output is available: ${SKIN_OUTPUT_PORT}"
+log "Starting local touch reader"
+"$READER_EXECUTABLE" &
+READER_PID=$!
 
-# -----------------------------------------------------------------------------
-# Start the local GUI in compensated-data mode.
-# -----------------------------------------------------------------------------
-log "Starting local GUI: ${SKIN_GUI_EXECUTABLE} --from ${SKIN_GUI_CONFIG} --useCalibration"
+wait_for_port "$LEFT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
+    "left touch-reader input"
+wait_for_port "$RIGHT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
+    "right touch-reader input"
+wait_for_port "$LEFT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
+    "left local compensated output"
+wait_for_port "$RIGHT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
+    "right local compensated output"
 
-"$SKIN_GUI_EXECUTABLE" \
-    --from "$SKIN_GUI_CONFIG" \
-    --useCalibration &
+log "Connecting compensated skin streams to touch_reader"
+yarp connect "$LEFT_COMPENSATED_SOURCE" "$LEFT_LOCAL_INPUT" "$REMOTE_CARRIER"
+yarp connect "$RIGHT_COMPENSATED_SOURCE" "$RIGHT_LOCAL_INPUT" "$REMOTE_CARRIER"
 
+log "Starting right-hand skin GUI"
+"$SKIN_GUI_EXECUTABLE" --from "$SKIN_GUI_CONFIG" --useCalibration &
 GUI_PID=$!
 
-if ! wait_for_port "$LOCAL_INPUT_PORT" "$GUI_WAIT_SECONDS" \
-    "local skin GUI input"; then
-    if ! kill -0 "$GUI_PID" 2>/dev/null; then
-        error "${SKIN_GUI_EXECUTABLE} exited before opening ${LOCAL_INPUT_PORT}."
-    else
-        error "Timed out after ${GUI_WAIT_SECONDS}s waiting for ${LOCAL_INPUT_PORT}."
-    fi
+wait_for_port "$GUI_INPUT_PORT" "$GUI_WAIT_SECONDS" \
+    "right-hand skin GUI input"
 
-    exit 1
-fi
-
-# -----------------------------------------------------------------------------
-# Connect the compensated skin stream to the GUI.
-# -----------------------------------------------------------------------------
-log "Connecting ${SKIN_OUTPUT_PORT} -> ${LOCAL_INPUT_PORT} using ${CARRIER}"
-
-if ! yarp connect "$SKIN_OUTPUT_PORT" "$LOCAL_INPUT_PORT" "$CARRIER"; then
-    error "Could not connect ${SKIN_OUTPUT_PORT} to ${LOCAL_INPUT_PORT}."
-    error "Try manually:"
-    error "  yarp connect ${SKIN_OUTPUT_PORT} ${LOCAL_INPUT_PORT} ${CARRIER}"
-    exit 1
-fi
+log "Connecting the local right-hand output to the GUI"
+yarp connect "$RIGHT_LOCAL_OUTPUT" "$GUI_INPUT_PORT" "$LOCAL_CARRIER"
 
 log "Skin pipeline is running"
-log "Close the GUI or press Ctrl+C to stop this launcher"
+log "Local outputs:"
+log "  $LEFT_LOCAL_OUTPUT"
+log "  $RIGHT_LOCAL_OUTPUT"
+log "Press Ctrl+C to stop"
 
-# Exit when the GUI is closed. The cleanup trap removes the connection.
-wait "$GUI_PID" || true
-GUI_PID=""
-
-log "Local skin GUI closed"
-
-git add -A -- CMakeLists.txt TODOs.md run_perception.sh run_rgbCam.sh run_touch.sh setup_cluster.sh src/Touch_reader.cpp src/rgbCam_reader.cpp .monitoring/logs/detections_terminal.log .monitoring/logs/processed_left_view.log .monitoring/logs/processed_right_view.log .monitoring/logs/raw_left_view.log .monitoring/logs/raw_right_view.log .monitoring/logs/terminal_four.log .monitoring/logs/terminal_three.log .monitoring/logs/terminal_two.log .monitoring/logs/vframer.log .monitoring/logs/yarpscope.log config/monitoring.env run_eventCam.sh scripts/print_rgb_detections.sh scripts/run_monitor.sh scripts/stop_monitor.sh
+wait "$READER_PID"

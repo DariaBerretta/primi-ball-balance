@@ -73,3 +73,10 @@ sleep 2
 echo "Started yarprobotinterface on icub-head and start_clock on icub-ultrascale."
 yarp run --on /icub-head --as yarprobotinterface --cmd "yarprobotinterface"
 yarp run --on /icub-ultrascale --as start_clock --cmd "/home/icub/start_clock.sh"
+
+# start cartesian solvers
+sleep 2
+# echo "Starting cartesian solvers."
+# # yarp run  --as cartesianSolverLeftArm --cmd "iKinCartesainSolver --part left_arm"
+# yarp run  --as cartesianSolverRightArm --cmd "iKinCartesainSolver --part right_arm"
+# yarp run  --as cartesianSolverGaze --cmd "iKinGazeCtrl --from .local/share/yarp/robots/iCubGenova02/iKinGazeCtrl.ini --head_version 2.8"

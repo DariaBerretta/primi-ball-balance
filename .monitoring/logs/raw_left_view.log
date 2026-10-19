@@ -4,9 +4,10 @@ file:///usr/lib/x86_64-linux-gnu/qt5/qml/QtQuick/Dialogs/DefaultFileDialog.qml:1
 file:///usr/lib/x86_64-linux-gnu/qt5/qml/QtQuick/Dialogs/DefaultFileDialog.qml:102:33: QML Settings: The following application identifiers have not been set: QVector("organizationName", "organizationDomain")
 /primi-ball-balance/monitor/rgb/left/raw:i
 PRIMI - RGB Raw Left
-[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[36m/primi-ball-balance/monitor/rgb/left/raw:i[00m| Port /primi-ball-balance/monitor/rgb/left/raw:i active at tcp://10.0.0.189:10187/
-[[01;34mINFO[00m] |[01;34myarp.os.impl.PortCoreInputUnit[00m|[36m/primi-ball-balance/monitor/rgb/left/raw:i[00m| Receiving input from /primi-ball-balance/rgbCam/left/raw:o to /primi-ball-balance/monitor/rgb/left/raw:i using tcp
-Surface STARTED! Dimensions: 1280x1024 -- PixelFormat: 3
+[[01;34mINFO[00m] |[01;32myarp.os.Port[00m|[36m/primi-ball-balance/monitor/rgb/left/raw:i[00m| Port /primi-ball-balance/monitor/rgb/left/raw:i active at tcp://10.0.0.189:10247/
+[[01;34mINFO[00m] |[01;34myarp.os.impl.PortCoreInputUnit[00m|[36m/primi-ball-balance/monitor/rgb/left/raw:i[00m| Receiving input from /primi-ball-balance/rgbCam/left/raw:o to /primi-ball-balance/monitor/rgb/left/raw:i using shmem
+[[01;32mDEBUG[00m] |[01;37myarp.carrier.shmem[00m| input stream resize 1 to 1970176
+Surface STARTED! Dimensions: 640x512 -- PixelFormat: 3
 [[01;34mINFO[00m] |[01;34myarp.os.impl.PortCoreInputUnit[00m|[36m/primi-ball-balance/monitor/rgb/left/raw:i[00m| Removing input from /primi-ball-balance/rgbCam/left/raw:o to /primi-ball-balance/monitor/rgb/left/raw:i
 
 Yarpview killed by signal(15).

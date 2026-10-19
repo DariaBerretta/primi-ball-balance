@@ -216,6 +216,7 @@ start_process vframer \
     --width "$EVENT_WIDTH" \
     --height "$EVENT_HEIGHT" \
     --fps "$EVENT_FPS" \
+    --window_size 1.0 \
     --grey
 
 start_process raw_left_view \
@@ -247,10 +248,10 @@ wait_for_port "$right_raw_view"
 wait_for_port "$left_processed_view"
 wait_for_port "$right_processed_view"
 
-yarp connect "$RGB_LEFT_RAW_SOURCE" "$left_raw_view" tcp
-yarp connect "$RGB_RIGHT_RAW_SOURCE" "$right_raw_view" tcp
-yarp connect "$RGB_LEFT_PROCESSED_SOURCE" "$left_processed_view" tcp
-yarp connect "$RGB_RIGHT_PROCESSED_SOURCE" "$right_processed_view" tcp
+yarp connect "$RGB_LEFT_RAW_SOURCE" "$left_raw_view" shmem
+yarp connect "$RGB_RIGHT_RAW_SOURCE" "$right_raw_view" shmem
+yarp connect "$RGB_LEFT_PROCESSED_SOURCE" "$left_processed_view" shmem
+yarp connect "$RGB_RIGHT_PROCESSED_SOURCE" "$right_processed_view" shmem
 
 start_process detections_terminal \
     terminator \

@@ -39,7 +39,7 @@ void readEncoders(
         std::scoped_lock lock(outputMutex);
         std::cerr << "Could not get IEncoders interface for " << partName << '\n';
         driver.close();
-        return;
+        return; 
     }
 
     int numAxes = 0;
