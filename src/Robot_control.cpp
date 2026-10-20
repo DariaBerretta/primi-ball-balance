@@ -93,7 +93,7 @@ struct Options
      *
      * The remaining joints belong to the hand.
      */
-    int controlledJoints = 7;
+    int controlledJoints = 16;
 
     /*
      * Speed used ONLY to reach INIT before starting
@@ -1188,6 +1188,117 @@ bool holdPosition(
     return true;
 }
 
+// ============================================================
+// Open hand on user request
+// ============================================================
+
+bool openHand(
+    yarp::dev::IPositionControl* iPos,
+    yarp::dev::IControlMode* iMode)
+{
+    /*
+     * iCub right_arm joints:
+     *
+     * 0-6  : shoulder, elbow, wrist
+     * 7-15 : hand and fingers
+     *
+     * Only joints 7-15 are commanded.
+     * The arm remains at its final position.
+     */
+
+    const std::vector<int> fingerJoints = {
+        7, 8, 9, 10, 11, 12, 13, 14, 15
+    };
+
+    /*
+     * Example open-hand configuration.
+     *
+     * Replace with the appropriate home positions
+     * for your robot if they differ.
+     */
+    const std::vector<double> homePose = {
+        0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0
+    };
+
+    const int n = static_cast<int>(fingerJoints.size());
+
+    // Reference speed for opening the fingers.
+    const std::vector<double> speeds(n, 10.0);
+
+    std::cout << "\n[HAND] Opening fingers...\n";
+
+    // Switch fingers to POSITION control.
+    if (!setJointModes(
+            iMode,
+            fingerJoints,
+            VOCAB_CM_POSITION))
+    {
+        std::cerr
+            << "[ERROR] Could not switch fingers "
+            << "to POSITION mode\n";
+
+        return false;
+    }
+
+    // Set finger movement speeds.
+    if (!iPos->setRefSpeeds(
+            n,
+            fingerJoints.data(),
+            speeds.data()))
+    {
+        std::cerr
+            << "[ERROR] Could not set finger speeds\n";
+
+        return false;
+    }
+
+    // Command the open-hand configuration.
+    if (!iPos->positionMove(
+            n,
+            fingerJoints.data(),
+            homePose.data()))
+    {
+        std::cerr
+            << "[ERROR] Could not command hand opening\n";
+
+        return false;
+    }
+
+    // Wait for the fingers to reach their targets.
+    const auto start = std::chrono::steady_clock::now();
+
+    while (true)
+    {
+        bool done = false;
+
+        if (iPos->checkMotionDone(
+                n,
+                fingerJoints.data(),
+                &done) && done)
+        {
+            std::cout << "[HAND] Opening completed.\n";
+            return true;
+        }
+
+        const double elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start
+            ).count();
+
+        if (elapsed > 15.0)
+        {
+            std::cerr
+                << "[ERROR] Hand opening timeout\n";
+
+            return false;
+        }
+
+        yarp::os::Time::delay(0.05);
+    }
+}
+
 } // namespace
 
 
@@ -1536,6 +1647,27 @@ int main(
             lastCommand,
             opt.initSpeed);
 
+    // --------------------------------------------------------
+    // 5. Optionally open the hand
+    // --------------------------------------------------------
+
+    bool handOK = true;
+
+    if (playbackOK && holdOK && !stopRequested)
+    {
+        std::cout
+            << "\nMovement completed.\n"
+            << "Open the hand? [y/N]: ";
+
+        std::string response;
+        std::getline(std::cin, response);
+
+        if (response == "y" || response == "Y")
+        {
+            handOK = openHand(iPos, iMode);
+        }
+    }
+
 
     // --------------------------------------------------------
     // Close
@@ -1549,7 +1681,7 @@ int main(
 
 
     return
-        (playbackOK && holdOK)
+        (playbackOK && holdOK && handOK)
             ? 0
             : 1;
 }
