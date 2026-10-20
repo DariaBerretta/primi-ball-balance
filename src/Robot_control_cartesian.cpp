@@ -160,7 +160,7 @@ namespace
     {
         const int totalPoints = intermediatePoints + 2;
         const yarp::sig::Vector start =
-            makePosition(START_X, START_Y, START_Z);
+              makePosition(START_X, START_Y, START_Z);
         const yarp::sig::Vector end =
             makePosition(END_X, END_Y, END_Z);
         std::vector<yarp::sig::Vector> waypoints;
@@ -639,7 +639,8 @@ int main(int argc, char *argv[])
 
     if (!moveToStart(
             iCart,
-            start,
+            // start,
+            currentPos,
             fixedOrientation,
             opt.initTimeout,
             opt.inTargetTol))

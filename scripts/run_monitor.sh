@@ -1,355 +1,193 @@
 #!/usr/bin/env bash
-
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="${1:-$ROOT_DIR/config/monitoring.env}"
-
-STATE_DIR="$ROOT_DIR/.monitoring"
-PID_DIR="$STATE_DIR/pids"
-LOG_DIR="$STATE_DIR/logs"
-
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "Monitoring configuration not found: $CONFIG_FILE"
-    exit 1
-fi
-
-# shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
-required_commands=(
-    yarp
-    yarpview
-    yarpscope
-    vFramer
-    terminator
-    wmctrl
-    xrandr
-    stdbuf
-)
+PID_DIR="$ROOT_DIR/.monitoring/pids"
+LOG_DIR="$ROOT_DIR/.monitoring/logs"
+mkdir -p "$PID_DIR" "$LOG_DIR"
 
-for command_name in "${required_commands[@]}"; do
-    if ! command -v "$command_name" >/dev/null 2>&1; then
-        echo "Required command not found: $command_name"
-        exit 1
-    fi
+for cmd in yarp yarpview yarpscope vFramer terminator wmctrl xrandr stdbuf; do
+    command -v "$cmd" >/dev/null || { echo "Missing command: $cmd"; exit 1; }
 done
 
-if ! yarp where >/dev/null 2>&1; then
-    echo "The YARP name server is not reachable."
-    exit 1
-fi
-
-if [[ -z "${DISPLAY:-}" ]]; then
-    echo "DISPLAY is not set."
-    exit 1
-fi
+yarp where >/dev/null || { echo "YARP name server unavailable"; exit 1; }
 
 screen_size="$(xrandr --current | awk '/\*/ {print $1; exit}')"
-
-if [[ -z "$screen_size" ]]; then
-    echo "Could not determine the display resolution."
-    exit 1
-fi
-
-detected_width="${screen_size%x*}"
-detected_height="${screen_size#*x}"
-
-if [[ "${MONITOR_WIDTH:-0}" -le 0 ]]; then
-    MONITOR_WIDTH="$detected_width"
-fi
-
-if [[ "${MONITOR_HEIGHT:-0}" -le 0 ]]; then
-    MONITOR_HEIGHT="$detected_height"
-fi
-
+MONITOR_WIDTH="${MONITOR_WIDTH:-0}"
+MONITOR_HEIGHT="${MONITOR_HEIGHT:-0}"
+(( MONITOR_WIDTH > 0 )) || MONITOR_WIDTH="${screen_size%x*}"
+(( MONITOR_HEIGHT > 0 )) || MONITOR_HEIGHT="${screen_size#*x}"
 MONITOR_X="${MONITOR_X:-0}"
 MONITOR_Y="${MONITOR_Y:-0}"
 WINDOW_GAP="${WINDOW_GAP:-4}"
 
-mkdir -p "$PID_DIR" "$LOG_DIR"
-
-start_process()
-{
+start_process() {
     local name="$1"
     shift
 
-    local pid_file="$PID_DIR/$name.pid"
-
-    if [[ -f "$pid_file" ]]; then
-        local existing_pid
-        existing_pid="$(cat "$pid_file")"
-
-        if kill -0 "$existing_pid" 2>/dev/null; then
-            echo "$name is already running with PID $existing_pid"
-            exit 1
-        fi
-
-        rm -f "$pid_file"
+    if [[ -f "$PID_DIR/$name.pid" ]] &&
+       kill -0 "$(cat "$PID_DIR/$name.pid")" 2>/dev/null; then
+        echo "$name is already running" >&2
+        return 1
     fi
 
-    echo "Starting $name..."
-
     "$@" >"$LOG_DIR/$name.log" 2>&1 &
-    echo "$!" >"$pid_file"
+    echo "$!" >"$PID_DIR/$name.pid"
 }
 
-wait_for_port()
-{
-    local port="$1"
-    local attempts="${2:-100}"
+wait_for_port() {
+    echo "Waiting for $1"
 
-    echo "Waiting for $port"
-
-    for _ in $(seq 1 "$attempts"); do
-        if yarp exists "$port" >/dev/null 2>&1; then
-            return 0
-        fi
-
+    for ((i=0; i<100; i++)); do
+        yarp exists "$1" >/dev/null 2>&1 && return 0
         sleep 0.1
     done
 
-    echo "Timed out waiting for port: $port"
+    echo "Timed out waiting for port: $1" >&2
     return 1
 }
 
-wait_for_window()
-{
-    local title="$1"
-    local attempts="${2:-100}"
+wait_for_window() {
+    echo "Waiting for window: $1"
 
-    for _ in $(seq 1 "$attempts"); do
-        if wmctrl -l | grep -Fq "$title"; then
-            return 0
-        fi
-
+    for ((i=0; i<100; i++)); do
+        wmctrl -l | grep -Fq "$1" && return 0
         sleep 0.1
     done
 
-    echo "Timed out waiting for window: $title"
+    echo "Timed out waiting for window: $1" >&2
     return 1
 }
 
-place_window()
-{
-    local title="$1"
-    local x="$2"
-    local y="$3"
-    local width="$4"
-    local height="$5"
-
-    wmctrl -r "$title" -b remove,maximized_vert,maximized_horz \
-        >/dev/null 2>&1 || true
-
-    wmctrl -r "$title" -e "0,$x,$y,$width,$height"
+place_window() {
+    wmctrl -r "$1" -b remove,maximized_vert,maximized_horz >/dev/null 2>&1 || true
+    wmctrl -r "$1" -e "0,$2,$3,$4,$5"
 }
 
-cleanup_after_error()
-{
-    echo
-    echo "Monitoring startup failed."
-    "$ROOT_DIR/scripts/stop_monitor.sh" "$CONFIG_FILE" >/dev/null 2>&1 || true
-}
+trap '"$ROOT_DIR/scripts/stop_monitor.sh" "$CONFIG_FILE" >/dev/null 2>&1 || true' ERR
 
-trap cleanup_after_error ERR
+# Screen geometry
+qw=$(((MONITOR_WIDTH - WINDOW_GAP) / 2))
+qh=$(((MONITOR_HEIGHT - WINDOW_GAP) / 2))
+cw=$(((qw - WINDOW_GAP) / 2))
+ch=$(((qh - WINDOW_GAP) / 2))
 
-quadrant_width=$(((MONITOR_WIDTH - WINDOW_GAP) / 2))
-quadrant_height=$(((MONITOR_HEIGHT - WINDOW_GAP) / 2))
+lx="$MONITOR_X"
+rx=$((lx + qw + WINDOW_GAP))
+ty="$MONITOR_Y"
+by=$((ty + qh + WINDOW_GAP))
 
-left_x="$MONITOR_X"
-right_x=$((MONITOR_X + quadrant_width + WINDOW_GAP))
+# Skin GUI (temporarily disabled)
+# skin_source="/primi-ball-balance/skin/right_hand/compensated:o"
+# skin_input="/skinGui/right_hand:i"
 
-top_y="$MONITOR_Y"
-bottom_y=$((MONITOR_Y + quadrant_height + WINDOW_GAP))
-
-inner_width=$(((quadrant_width - WINDOW_GAP) / 2))
-inner_height=$(((quadrant_height - WINDOW_GAP) / 2))
-
-inner_right_offset=$((inner_width + WINDOW_GAP))
-inner_bottom_offset=$((inner_height + WINDOW_GAP))
+left_view="/primi-ball-balance/monitor/rgb/left/processed:i"
+right_view="/primi-ball-balance/monitor/rgb/right/processed:i"
 
 scope_title="PRIMI - YARP Scope"
-
-event_left_title="$EVENT_LEFT_SOURCE"
-event_right_title="$EVENT_RIGHT_SOURCE"
-
-raw_left_title="PRIMI - RGB Raw Left"
-raw_right_title="PRIMI - RGB Raw Right"
-processed_left_title="PRIMI - RGB Processed Left"
-processed_right_title="PRIMI - RGB Processed Right"
-
+rgb_left_title="PRIMI - RGB Processed Left"
+rgb_right_title="PRIMI - RGB Processed Right"
 detections_title="PRIMI - RGB Detections"
-terminal_two_title="PRIMI - Terminal 2"
-terminal_three_title="PRIMI - Terminal 3"
-terminal_four_title="PRIMI - Terminal 4"
+terminal_title="PRIMI - Terminal 2"
 
-left_raw_view="/primi-ball-balance/monitor/rgb/left/raw:i"
-right_raw_view="/primi-ball-balance/monitor/rgb/right/raw:i"
+# Wait for acquisition streams
+for port in "$RGB_LEFT_PROCESSED_SOURCE" "$RGB_RIGHT_PROCESSED_SOURCE" \
+            "$RGB_LEFT_DETECTION_SOURCE" "$RGB_RIGHT_DETECTION_SOURCE" \
+            "$EVENT_LEFT_SOURCE" "$EVENT_RIGHT_SOURCE" "$SCOPE_REMOTE"; do
+    wait_for_port "$port"
+done
 
-left_processed_view="/primi-ball-balance/monitor/rgb/left/processed:i"
-right_processed_view="/primi-ball-balance/monitor/rgb/right/processed:i"
-
-wait_for_port "$RGB_LEFT_RAW_SOURCE"
-wait_for_port "$RGB_RIGHT_RAW_SOURCE"
-wait_for_port "$RGB_LEFT_PROCESSED_SOURCE"
-wait_for_port "$RGB_RIGHT_PROCESSED_SOURCE"
-wait_for_port "$RGB_LEFT_DETECTION_SOURCE"
-wait_for_port "$RGB_RIGHT_DETECTION_SOURCE"
-
-wait_for_port "$EVENT_LEFT_SOURCE"
-wait_for_port "$EVENT_RIGHT_SOURCE"
-wait_for_port "$SCOPE_REMOTE"
-
-start_process yarpscope \
-    yarpscope \
+# Start visualization processes
+start_process yarpscope yarpscope \
     --title "$scope_title" \
     --remote "$SCOPE_REMOTE" \
     --index "$SCOPE_INDEX" \
     --min "$SCOPE_MIN" \
     --max "$SCOPE_MAX"
 
-start_process vframer \
-    vFramer \
+start_process vframer vFramer \
     --name /primi-ball-balance/monitor/vFramer \
     --src "$EVENT_LEFT_SOURCE" \
     --src1 "$EVENT_RIGHT_SOURCE" \
     --width "$EVENT_WIDTH" \
     --height "$EVENT_HEIGHT" \
     --fps "$EVENT_FPS" \
-    --window_size 1.0 \
-    --grey
+    --window_size 1.0 
+    # --grey
 
-start_process raw_left_view \
-    yarpview \
+start_process processed_left_view yarpview \
+    --minimal \--
+    --title "$rgb_left_title" \
+    --name "$left_view"
+
+start_process processed_right_view yarpview \
     --minimal \
-    --title "$raw_left_title" \
-    --name "$left_raw_view"
+    --title "$rgb_right_title" \
+    --name "$right_view"
 
-start_process raw_right_view \
-    yarpview \
-    --minimal \
-    --title "$raw_right_title" \
-    --name "$right_raw_view"
+# Skin GUI (temporarily disabled)
+# start_process skin_gui iCubSkinGui --from right_hand_V2_1.ini --useCalibration
 
-start_process processed_left_view \
-    yarpview \
-    --minimal \
-    --title "$processed_left_title" \
-    --name "$left_processed_view"
-
-start_process processed_right_view \
-    yarpview \
-    --minimal \
-    --title "$processed_right_title" \
-    --name "$right_processed_view"
-
-wait_for_port "$left_raw_view"
-wait_for_port "$right_raw_view"
-wait_for_port "$left_processed_view"
-wait_for_port "$right_processed_view"
-
-yarp connect "$RGB_LEFT_RAW_SOURCE" "$left_raw_view" shmem
-yarp connect "$RGB_RIGHT_RAW_SOURCE" "$right_raw_view" shmem
-yarp connect "$RGB_LEFT_PROCESSED_SOURCE" "$left_processed_view" shmem
-yarp connect "$RGB_RIGHT_PROCESSED_SOURCE" "$right_processed_view" shmem
-
-start_process detections_terminal \
-    terminator \
+start_process detections_terminal terminator \
     --no-dbus \
     --title "$detections_title" \
     --working-directory "$ROOT_DIR" \
     -x "$ROOT_DIR/scripts/print_rgb_detections.sh" \
     "$RGB_LEFT_DETECTION_SOURCE" "$RGB_RIGHT_DETECTION_SOURCE"
 
-start_process terminal_two \
-    terminator \
+start_process terminal_two terminator \
     --no-dbus \
-    --title "$terminal_two_title" \
+    --title "$terminal_title" \
     --working-directory "$ROOT_DIR"
 
-start_process terminal_three \
-    terminator \
-    --no-dbus \
-    --title "$terminal_three_title" \
-    --working-directory "$ROOT_DIR"
+# Connect visualization streams
+wait_for_port "$left_view"
+wait_for_port "$right_view"
+# wait_for_port "$skin_input"
 
-start_process terminal_four \
-    terminator \
-    --no-dbus \
-    --title "$terminal_four_title" \
-    --working-directory "$ROOT_DIR"
+yarp connect "$RGB_LEFT_PROCESSED_SOURCE" "$left_view" shmem
+yarp connect "$RGB_RIGHT_PROCESSED_SOURCE" "$right_view" shmem
+# yarp connect "$skin_source" "$skin_input" shmem
 
-wait_for_window "$scope_title"
+# Wait for visualization windows
+for title in "$scope_title" "$EVENT_LEFT_SOURCE" "$EVENT_RIGHT_SOURCE" \
+             "$rgb_left_title" "$rgb_right_title" \
+             "$detections_title" "$terminal_title"; do
+    wait_for_window "$title"
+done
 
-wait_for_window "$event_left_title"
-wait_for_window "$event_right_title"
+# Skin GUI (temporarily disabled)
+# wait_for_window "iCubSkinGui"
 
-wait_for_window "$raw_left_title"
-wait_for_window "$raw_right_title"
-wait_for_window "$processed_left_title"
-wait_for_window "$processed_right_title"
+# Top-left: YARP Scope (25%)
+place_window "$scope_title" "$lx" "$ty" "$qw" "$qh"
 
-wait_for_window "$detections_title"
-wait_for_window "$terminal_two_title"
-wait_for_window "$terminal_three_title"
-wait_for_window "$terminal_four_title"
+# Top-right: Four cameras (25% total)
+place_window "$EVENT_LEFT_SOURCE" \
+    "$rx" "$ty" "$cw" "$ch"
 
-#============ Top-left: YARP scope ============
+place_window "$EVENT_RIGHT_SOURCE" \
+    "$((rx + cw + WINDOW_GAP))" "$ty" "$cw" "$ch"
 
-place_window "$scope_title" \
-    "$left_x" "$top_y" \
-    "$quadrant_width" "$quadrant_height"
+place_window "$rgb_left_title" \
+    "$rx" "$((ty + ch + WINDOW_GAP))" "$cw" "$ch"
 
-#============ Top-right: event cameras ============
+place_window "$rgb_right_title" \
+    "$((rx + cw + WINDOW_GAP))" "$((ty + ch + WINDOW_GAP))" "$cw" "$ch"
 
-place_window "$event_left_title" \
-    "$right_x" "$top_y" \
-    "$inner_width" "$quadrant_height"
+# Bottom-left: Skin GUI (25%, temporarily disabled)
+# place_window "iCubSkinGui" "$lx" "$by" "$qw" "$qh"
 
-place_window "$event_right_title" \
-    "$((right_x + inner_right_offset))" "$top_y" \
-    "$inner_width" "$quadrant_height"
-
-#============ Bottom-left: RGB ============
-
-place_window "$raw_left_title" \
-    "$left_x" "$bottom_y" \
-    "$inner_width" "$inner_height"
-
-place_window "$raw_right_title" \
-    "$((left_x + inner_right_offset))" "$bottom_y" \
-    "$inner_width" "$inner_height"
-
-place_window "$processed_left_title" \
-    "$left_x" "$((bottom_y + inner_bottom_offset))" \
-    "$inner_width" "$inner_height"
-
-place_window "$processed_right_title" \
-    "$((left_x + inner_right_offset))" \
-    "$((bottom_y + inner_bottom_offset))" \
-    "$inner_width" "$inner_height"
-
-#============ Bottom-right: terminals ============
-
+# Bottom-right: Two vertically stacked terminals (25%)
 place_window "$detections_title" \
-    "$right_x" "$bottom_y" \
-    "$inner_width" "$inner_height"
+    "$rx" "$by" "$qw" "$ch"
 
-place_window "$terminal_two_title" \
-    "$((right_x + inner_right_offset))" "$bottom_y" \
-    "$inner_width" "$inner_height"
-
-place_window "$terminal_three_title" \
-    "$right_x" "$((bottom_y + inner_bottom_offset))" \
-    "$inner_width" "$inner_height"
-
-place_window "$terminal_four_title" \
-    "$((right_x + inner_right_offset))" \
-    "$((bottom_y + inner_bottom_offset))" \
-    "$inner_width" "$inner_height"
+place_window "$terminal_title" \
+    "$rx" "$((by + ch + WINDOW_GAP))" "$qw" "$ch"
 
 trap - ERR
 
-echo
-echo "Monitoring application started."
-echo "No camera or reader processes were started."
+echo "Monitoring started (skin GUI disabled)."

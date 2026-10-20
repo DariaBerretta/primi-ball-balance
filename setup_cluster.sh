@@ -70,9 +70,23 @@ done
 
 sleep 2
 
-echo "Started yarprobotinterface on icub-head and start_clock on icub-ultrascale."
-yarp run --on /icub-head --as yarprobotinterface --cmd "yarprobotinterface"
-yarp run --on /icub-ultrascale --as start_clock --cmd "/home/icub/start_clock.sh"
+# echo "Started yarprobotinterface on icub-head and start_clock on icub-ultrascale."
+# yarp run --on /icub-head --as yarprobotinterface --cmd "gotoRobotsConfiguration && yarprobotinterface"
+# yarp run --on /icub-ultrascale --as start_clock --cmd "/home/icub/start_clock.sh"
+
+echo "Starting yarprobotinterface..."
+
+yarp run --on /icub-head --as yarprobotinterface \
+    --cmd "yarprobotinterface --config /usr/local/src/robot/robotology-superbuild/src/robots-configuration/iCubGenova02/icub_right_arm.xml" \
+    --stdio /iiticublap267
+
+echo "Starting clock..."
+
+yarp run --on /icub-ultrascale  --as start_clock  --cmd "/home/icub/start_clock.sh" --stdio /iiticublap267
+
+yarp run --on /iiticublap267 --as iKinCartesianSolver --cmd "iKinCartesianSolver --part right_arm" --stdio /iiticublap267
+
+yarp run --on /iiticublap267 --as cartesianInterfaceControl --cmd "cartesianInterfaceControl --part right_arm --only xyz" --stdio /iiticublap267
 
 # start cartesian solvers
 sleep 2
