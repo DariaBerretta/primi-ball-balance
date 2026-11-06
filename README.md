@@ -1,25 +1,32 @@
-https://www.yarp.it/latest/index.html
-https://mesh-iit.github.io/documentation/
-https://github.com/robotology/event-driven
-https://robotology.github.io/robotology-documentation/doc/html/
-https://github.com/robotology/event-driven/tree/v1.7/src/applications/gazeDemo
+# iCub Cartesian controller: sequential tests
 
-<application>
-<name>vView </name>
+Copy the `include/` and `src/` files to the matching folders in `primi-ball-balance`. Replace the repository root `CMakeLists.txt` with the supplied full version. The existing joint-space controller `Robot_control.cpp` is not changed.
 
-<dependencies>
-</dependencies>
+Edit `include/CartesianConfig.h` to define START and END coordinates in meters and the movement times. All three executables use the same configuration.
 
-<module>
-    <name> zynqGrabber </name>
-    <parameters>--left_off false --right_off false --sensitivity 65 </parameters>
-    <node> icub-ultrascale </node>
-</module>
+**Important:** the palm-facing-normal sign (`PALM_FACING_NORMAL_IS_LOCAL_POSITIVE_X`) is provisional until checked against your specific iCub's physical hand frame. The YARP end-effector coordinate frame is not itself evidence of which side is the palm-facing surface. Do not run physical motions before confirming it in simulation/kinematic visualization. The code checks only endpoint palm tilt and position; it does not prove obstacle clearance or continuous horizontal alignment.
 
-<module>
-    <name> vFramer </name>
-    <parameters>--iso --height 480 --width 640 --src1 /zynqGrabber/right/AE:o --src2 /zynqGrabber/left/AE:o</parameters>
-    <node>iiticublap267</node>
-</module>
+Configure and build:
 
-</application>
+```bash
+cmake -S . -B build
+cmake --build build -j4
+```
+
+Preflight (IK only, no commanded movement):
+
+```bash
+./build/Cartesian_to_start --robot icub
+./build/Cartesian_to_end --robot icub
+./build/Robot_control_cartesian_bear --robot icub
+```
+
+Physical movement only after review of predicted position/orientation and workspace:
+
+```bash
+./build/Cartesian_to_start --robot icub --execute
+./build/Cartesian_to_end --robot icub --execute
+./build/Robot_control_cartesian_bear --robot icub --execute
+```
+
+In the final program, the arm moves to START then executes `CYCLES` complete START-to-END-to-START movements. Finger joints are not yet controlled. This repository was not compiled against the real robot's installed YARP libraries; test in a simulation before running on hardware.

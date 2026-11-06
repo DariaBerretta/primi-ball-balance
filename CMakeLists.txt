@@ -6,158 +6,70 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(YARP REQUIRED COMPONENTS os sig dev)
+find_package(YARP REQUIRED COMPONENTS os sig dev math)
 find_package(event-driven REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
 find_package(Threads REQUIRED)
 find_package(ICUB REQUIRED)
 
 #============ Shared Image Preprocessing ============
-
-add_library(image_preprocessing
-    src/ImagePreprocessor.cpp
-)
-
-target_include_directories(image_preprocessing PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_link_libraries(image_preprocessing PUBLIC
-    ${OpenCV_LIBS}
-)
+add_library(image_preprocessing src/ImagePreprocessor.cpp)
+target_include_directories(image_preprocessing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(image_preprocessing PUBLIC ${OpenCV_LIBS})
 
 #============ Ball Detection ============
-
-add_library(ball_detection
-    src/BallDetector.cpp
-)
-
-target_include_directories(ball_detection PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_link_libraries(ball_detection PUBLIC
-    image_preprocessing
-    ${OpenCV_LIBS}
-)
+add_library(ball_detection src/BallDetector.cpp)
+target_include_directories(ball_detection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(ball_detection PUBLIC image_preprocessing ${OpenCV_LIBS})
 
 #============ Event Camera Reader ============
-
-add_executable(eventCam_reader
-    src/eventCam_reader.cpp
-)
-
-target_link_libraries(eventCam_reader PRIVATE
-    YARP::YARP_os
-    YARP::YARP_init
-    ev::event-driven
-    Threads::Threads
-)
+add_executable(eventCam_reader src/eventCam_reader.cpp)
+target_link_libraries(eventCam_reader PRIVATE YARP::YARP_os YARP::YARP_init ev::event-driven Threads::Threads)
 
 #============ RGB Camera Reader ============
-
-add_executable(rgbCam_reader
-    src/rgbCam_reader.cpp
-)
-
-target_link_libraries(rgbCam_reader PRIVATE
-    ball_detection
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    Threads::Threads
-)
+add_executable(rgbCam_reader src/rgbCam_reader.cpp)
+target_link_libraries(rgbCam_reader PRIVATE ball_detection YARP::YARP_os YARP::YARP_sig YARP::YARP_init Threads::Threads)
 
 #============ Touch Reader ============
-
-add_executable(touch_reader
-    src/Touch_reader.cpp
-)
-
-target_link_libraries(touch_reader PRIVATE
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    Threads::Threads
-)
+add_executable(touch_reader src/Touch_reader.cpp)
+target_link_libraries(touch_reader PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
 
 #============ Proprioception Reader ============
-
-add_executable(proprio_reader
-    src/Proprio_reader.cpp
-)
-
-target_link_libraries(proprio_reader PRIVATE
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    YARP::YARP_dev
-    Threads::Threads
-)
+add_executable(proprio_reader src/Proprio_reader.cpp)
+target_link_libraries(proprio_reader PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
 
 #============ Ball Balance Controller ============
+add_executable(Robot_control src/Robot_control.cpp)
+target_link_libraries(Robot_control PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
 
-add_executable(Robot_control
-    src/Robot_control.cpp
-)
-
-target_link_libraries(Robot_control PRIVATE
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    YARP::YARP_dev
-    Threads::Threads
-)
-
-#============ Robot Control cartesian ============
-
-add_executable(Robot_control_cartesian
-    src/Robot_control_cartesian.cpp
-)
-
-target_link_libraries(Robot_control_cartesian PRIVATE
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    YARP::YARP_dev
-    Threads::Threads
-)
 
 #============ Image Preprocessor Test ============
-
-add_executable(test_preprocessor
-    src/test_preprocessor.cpp
-)
-
-target_link_libraries(test_preprocessor PRIVATE
-    image_preprocessing
-)
+add_executable(test_preprocessor src/test_preprocessor.cpp)
+target_link_libraries(test_preprocessor PRIVATE image_preprocessing)
 
 #============ Ball Detector Test ============
-
-add_executable(test_ball_detector
-    src/test_ball_detector.cpp
-)
-
-target_link_libraries(test_ball_detector PRIVATE
-    ball_detection
-)
+add_executable(test_ball_detector src/test_ball_detector.cpp)
+target_link_libraries(test_ball_detector PRIVATE ball_detection)
 
 #============ Joint to XYZ Test ============
+add_executable(joint_to_xyz src/joint_to_xyz.cpp)
+target_link_directories(joint_to_xyz PRIVATE ${ICUB_LINK_DIRECTORIES})
+target_link_libraries(joint_to_xyz PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init iKin ctrlLib Threads::Threads)
 
-add_executable(joint_to_xyz
-    src/joint_to_xyz.cpp
+#============ Online Event HPE (MoveEnetOFK) ============
+
+find_package(hpe-core REQUIRED)
+
+add_executable(moveEnetOFK_online
+    src/moveEnetOFK_online.cpp
 )
 
-target_link_directories(joint_to_xyz PRIVATE
-    ${ICUB_LINK_DIRECTORIES}
-)
-
-target_link_libraries(joint_to_xyz PRIVATE
+target_link_libraries(moveEnetOFK_online PRIVATE
     YARP::YARP_os
     YARP::YARP_sig
     YARP::YARP_init
-    iKin
-    ctrlLib
+    ev::event-driven
+    hpe-core::hpe-core
+    ${OpenCV_LIBS}
     Threads::Threads
 )

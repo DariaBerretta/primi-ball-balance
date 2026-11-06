@@ -41,7 +41,7 @@ namespace
         // Time allowed for the initial move to START.
         double initTimeout = 10.0;
         // Cartesian in-target tolerance [m].
-        double inTargetTol = 0.005;
+        double inTargetTol = 0.1;
     };
     void printUsage(const char *program)
     {
@@ -639,11 +639,12 @@ int main(int argc, char *argv[])
 
     if (!moveToStart(
             iCart,
-            // start,
-            currentPos,
+            start,
+            //currentPos,
             fixedOrientation,
             opt.initTimeout,
             opt.inTargetTol))
+
     {
         iCart->stopControl();
         // iCart->restoreContext(contextId);
