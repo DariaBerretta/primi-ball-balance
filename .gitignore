@@ -2,3 +2,4 @@ build/
 .monitoring/
 .vscode/
 .venv/
+logs/

@@ -2,6 +2,17 @@
 # Starts only the local pose-estimation pipeline; NEVER restarts zynqGrabber.
 set -Eeuo pipefail
 
+# --verbose precedes the optional config-file argument.
+if [[ "${1:-}" == "--verbose" ]]; then
+    shift
+else
+    exec >/dev/null 2>&1
+fi
+if (( $# > 1 )); then
+    printf 'Usage: %s [--verbose] [config.env]\n' "${0##*/}" >&2
+    exit 2
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${1:-$ROOT/config/moveEnetOFK.env}"
 if [[ ! -f "$CONFIG" ]]; then

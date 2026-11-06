@@ -2,6 +2,17 @@
 
 set -Eeuo pipefail
 
+# Print launcher and child-process output only with --verbose.
+if [[ "${1:-}" == "--verbose" ]]; then
+    shift
+else
+    exec >/dev/null 2>&1
+fi
+if (( $# != 0 )); then
+    printf 'Usage: %s [--verbose]\n' "${0##*/}" >&2
+    exit 2
+fi
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/eventCam_reader}"
 
