@@ -73,3 +73,11 @@ target_link_libraries(moveEnetOFK_online PRIVATE
     ${OpenCV_LIBS}
     Threads::Threads
 )
+# Add to the existing CMakeLists.txt, after the existing event-driven target.
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+add_executable(event_control_gui src/event_control_gui.cpp)
+target_link_libraries(event_control_gui PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    YARP::YARP_os YARP::YARP_init
+    ev::event-driven ${OpenCV_LIBS} Threads::Threads)
