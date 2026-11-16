@@ -647,7 +647,6 @@ bool moveToInit(
             }
         }
 
-
         const double elapsed =
             std::chrono::duration<double>(
                 std::chrono::steady_clock::now()
