@@ -2,12 +2,18 @@
 
 set -Eeuo pipefail
 
-# Print launcher and child-process output only with --verbose.
+# Preserve stdout for important status messages.
+exec 3>&1
+
+# Quiet by default, verbose output only when requested.
 if [[ "${1:-}" == "--verbose" ]]; then
     shift
+    exec 4>&1
 else
-    exec >/dev/null 2>&1
+    exec >/dev/null
+    exec 4>/dev/null
 fi
+
 if (( $# != 0 )); then
     printf 'Usage: %s [--verbose]\n' "${0##*/}" >&2
     exit 2
@@ -52,10 +58,16 @@ STOP_REMOTE_CAMERA_ON_EXIT="${STOP_REMOTE_CAMERA_ON_EXIT:-1}"
 READER_PID=""
 REMOTE_CAMERA_STARTED=0
 CLEANUP_DONE=0
+CLEANUP_ARMED=0
 
 log()
 {
     printf '[INFO] %s\n' "$*"
+}
+
+status()
+{
+    printf '[INFO] %s\n' "$*" >&3
 }
 
 error()
@@ -97,13 +109,14 @@ wait_for_port()
 
 stop_local_reader()
 {
-    if [[ -n "$READER_PID" ]] && kill -0 "$READER_PID" 2>/dev/null; then
-        kill -TERM "$READER_PID" 2>/dev/null || true
-        wait "$READER_PID" 2>/dev/null || true
-    fi
+    if [[ -n "$READER_PID" ]]; then
+        if kill -0 "$READER_PID" 2>/dev/null; then
+            kill -TERM "$READER_PID" 2>/dev/null || true
+        fi
 
-    pkill -x rgbCam_reader 2>/dev/null || true
-    READER_PID=""
+        wait "$READER_PID" 2>/dev/null || true
+        READER_PID=""
+    fi
 }
 
 stop_remote_camera()
@@ -133,7 +146,7 @@ apply_camera_setting()
 
     if ! yarp run --on "$REMOTE_RUN_SERVER" \
         --as "$tag" \
-        --cmd "$REMOTE_CAMERA_CLI --remote $CAMERA_OUTPUT_PORT --set ${code}=${value}"; then
+        --cmd "$REMOTE_CAMERA_CLI --remote $CAMERA_OUTPUT_PORT --set ${code}=${value}" >&4 2>&4; then
         error "Could not launch the command for ${label}."
         return 1
     fi
@@ -159,12 +172,14 @@ apply_camera_settings()
 
 cleanup()
 {
-    if (( CLEANUP_DONE )); then
+    if (( ! CLEANUP_ARMED || CLEANUP_DONE )); then
         return
     fi
 
     CLEANUP_DONE=1
-    printf '\n'
+
+    if [[ "${PRIMI_SENSOR_GROUP:-0}" != 1 ]]; then printf '\n' >&3; fi
+    status "Stopping RGB-camera pipeline..."
 
     yarp disconnect "$CAMERA_OUTPUT_PORT" "$LOCAL_INPUT_PORT" \
         >/dev/null 2>&1 || true
@@ -177,11 +192,15 @@ cleanup()
         log "Stopping remote RGB camera"
         stop_remote_camera
     fi
+
+    status "RGB-camera pipeline stopped."
 }
 
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Preliminary checks must not affect existing acquisition processes.
 
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
@@ -199,8 +218,18 @@ if ! port_exists "$REMOTE_RUN_SERVER"; then
     exit 1
 fi
 
-log "Stopping previous RGB processes"
-stop_local_reader
+# Do not terminate a reader belonging to another invocation.
+if pgrep -x rgbCam_reader >/dev/null 2>&1; then
+    error "An rgbCam_reader process is already running."
+    error "Stop the existing acquisition before starting another instance."
+    exit 1
+fi
+
+CLEANUP_ARMED=1
+
+status "Starting RGB-camera pipeline..."
+
+log "Stopping previous remote RGB camera"
 stop_remote_camera
 
 log "Removing stale RGB port registrations"
@@ -221,7 +250,7 @@ log "Starting RGB camera on ${REMOTE_RUN_SERVER}"
 
 if ! yarp run --on "$REMOTE_RUN_SERVER" \
     --as "$REMOTE_COMMAND_TAG" \
-    --cmd "$REMOTE_CAMERA_COMMAND"; then
+    --cmd "$REMOTE_CAMERA_COMMAND" >&4 2>&4; then
     error "Could not start the remote RGB camera."
     exit 1
 fi
@@ -244,16 +273,22 @@ READER_PID=$!
 
 wait_for_port "$LOCAL_INPUT_PORT" "$READER_WAIT_SECONDS" \
     "local RGB reader input"
+
 wait_for_port "$LEFT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
     "left raw RGB output"
+
 wait_for_port "$RIGHT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
     "right raw RGB output"
+
 wait_for_port "$LEFT_PROCESSED_OUTPUT" "$READER_WAIT_SECONDS" \
     "left processed RGB output"
+
 wait_for_port "$RIGHT_PROCESSED_OUTPUT" "$READER_WAIT_SECONDS" \
     "right processed RGB output"
+
 wait_for_port "$LEFT_DETECTION_OUTPUT" "$READER_WAIT_SECONDS" \
     "left RGB detection output"
+
 wait_for_port "$RIGHT_DETECTION_OUTPUT" "$READER_WAIT_SECONDS" \
     "right RGB detection output"
 
@@ -264,13 +299,15 @@ if ! yarp connect "$CAMERA_OUTPUT_PORT" "$LOCAL_INPUT_PORT" "$CARRIER"; then
     exit 1
 fi
 
-log "RGB pipeline is running"
+status "RGB-camera pipeline is running. Press Ctrl+C to stop."
+
 log "Camera settings:"
 log "  exposure:   ${CAMERA_EXPOSURE} ms"
 log "  gain:       ${CAMERA_GAIN}"
 log "  brightness: ${CAMERA_BRIGHTNESS}"
 log "  contrast:   ${CAMERA_CONTRAST}"
 log "  RGB gains:  ${CAMERA_RED_GAIN}/${CAMERA_GREEN_GAIN}/${CAMERA_BLUE_GAIN}"
+
 log "Local outputs:"
 log "  $LEFT_RAW_OUTPUT"
 log "  $RIGHT_RAW_OUTPUT"
@@ -278,6 +315,5 @@ log "  $LEFT_PROCESSED_OUTPUT"
 log "  $RIGHT_PROCESSED_OUTPUT"
 log "  $LEFT_DETECTION_OUTPUT"
 log "  $RIGHT_DETECTION_OUTPUT"
-log "Press Ctrl+C to stop"
 
 wait "$READER_PID"

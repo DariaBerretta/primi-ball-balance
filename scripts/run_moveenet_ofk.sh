@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Starts only the local pose-estimation pipeline; NEVER restarts zynqGrabber.
 set -Eeuo pipefail
+exec 3>&1
 
 # --verbose precedes the optional config-file argument.
 if [[ "${1:-}" == "--verbose" ]]; then
     shift
 else
-    exec >/dev/null 2>&1
+    exec >/dev/null
 fi
 if (( $# > 1 )); then
     printf 'Usage: %s [--verbose] [config.env]\n' "${0##*/}" >&2
     exit 2
 fi
+printf '[INFO] Starting MoveEnetOFK pose estimation... Press Ctrl+C to stop.\n' >&3
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${1:-$ROOT/config/moveEnetOFK.env}"
@@ -145,5 +147,6 @@ echo "[INFO] Skeleton: $BASE/skeleton:o"
 echo '[INFO] The camera reader is NOT owned by this script.'
 echo '[INFO] Ctrl+C stops only MoveEnetOFK and its Python sidecar.'
 
+printf '[INFO] MoveEnetOFK pose estimation running. Press Ctrl+C to stop.\n' >&3
 # Stop the other child if either one exits (bash >= 4.3).
 wait -n "$CPP_PID" "$PY_PID" || true

@@ -39,7 +39,7 @@ using Clock = std::chrono::steady_clock;
 using Mono = yarp::sig::ImageOf<yarp::sig::PixelMono>;
 using Rgb = yarp::sig::ImageOf<yarp::sig::PixelRgb>;
 
-std::atomic<bool> stopRequested{false};
+    std::atomic<bool> stopRequested{false};
 void signalHandler(int) { stopRequested.store(true); }
 
 constexpr std::array<int, 7> upperJoints = {
@@ -128,7 +128,7 @@ bool validCoord(double x, double y, const Config &cfg) {
 // accesses this object (acquisitionLoop): no additional locking required.
 // Time units are seconds, on the same relative axis as the SAE.
 class EventNoiseFilter {
-public:
+    public:
     enum class Decision { Keep, Refractory, NoSpatialSupport };
 
     explicit EventNoiseFilter(const Config &cfg)
@@ -150,10 +150,10 @@ public:
 
         bool spatiallySupported = spatialWindow_ <= 0;
         if (!refractory && !spatiallySupported) {
-            const int x0 = std::max(0, x - radius_);
-            const int x1 = std::min(width_ - 1, x + radius_);
-            const int y0 = std::max(0, y - radius_);
-            const int y1 = std::min(height_ - 1, y + radius_);
+        const int x0 = std::max(0, x - radius_);
+        const int x1 = std::min(width_ - 1, x + radius_);
+        const int y0 = std::max(0, y - radius_);
+        const int y1 = std::min(height_ - 1, y + radius_);
             for (int ny = y0; ny <= y1 && !spatiallySupported; ++ny) {
                 for (int nx = x0; nx <= x1; ++nx) {
                     if (nx == x && ny == y) continue;
@@ -178,7 +178,7 @@ public:
         return Decision::Keep;
     }
 
-private:
+    private:
     int width_, height_;
     bool enabled_;
     double refractory_, spatialWindow_;
@@ -196,7 +196,7 @@ struct Request {
 };
 
 struct Shared {
-    explicit Shared(const Config &c) : cfg(c), noiseFilter(c) {
+        explicit Shared(const Config &c) : cfg(c), noiseFilter(c) {
         eros.init(cfg.width, cfg.height, 7, 0.3);
         sae.init(cfg.width, cfg.height);
         // Value-initialization is essential: the upstream LC implementation
@@ -212,6 +212,7 @@ struct Shared {
     Config cfg;
     EventNoiseFilter noiseFilter;
     std::atomic<bool> running{true};
+    std::atomic<bool> inferenceTimedOut{false};
     std::mutex surfacesMutex;
     ev::EROS eros;
     hpecore::SAE sae;
@@ -245,7 +246,7 @@ struct Shared {
 
 // Copies only after taking the surface lock; cv::Mat shallow copies would race.
 bool snapshotEROS(Shared &s, cv::Mat &dst, double &timestamp,
-                  double &sourceTimestamp) {
+    double &sourceTimestamp) {
     std::lock_guard<std::mutex> lk(s.surfacesMutex);
     if (!s.haveEvents) return false;
     dst = s.eros.getSurface().clone();
@@ -255,7 +256,7 @@ bool snapshotEROS(Shared &s, cv::Mat &dst, double &timestamp,
 }
 
 bool snapshotSAE(Shared &s, cv::Mat &dst, double &timestamp,
-                 double &sourceTimestamp) {
+    double &sourceTimestamp) {
     std::lock_guard<std::mutex> lk(s.surfacesMutex);
     if (!s.haveEvents) return false;
     dst = s.sae.getSurface().clone();
@@ -302,8 +303,8 @@ void acquisitionLoop(Shared &s, ev::BufferedPort<ev::AE> &input) {
         if (!s.haveEvents) s.sourceEpoch = t;
         const double relativeTime = 1.0 + (t - s.sourceEpoch);
         for (auto &v : *packet) {
-            const int x = static_cast<int>(v.x);
-            const int y = static_cast<int>(v.y);
+        const int x = static_cast<int>(v.x);
+        const int y = static_cast<int>(v.y);
             if (x < 0 || y < 0 || x >= s.cfg.width || y >= s.cfg.height) {
                 ++invalidInPacket;
                 continue;
@@ -312,7 +313,7 @@ void acquisitionLoop(Shared &s, ev::BufferedPort<ev::AE> &input) {
             // If event-driven was built with individual timestamps, use them.
             // Otherwise packet-time SAE is a fallback with reduced flow accuracy.
             if (ev::ts_status) {
-                const double offset = ev::deltaS(
+            const double offset = ev::deltaS(
                     static_cast<int>(lastTick), static_cast<int>(v.ts));
                 if (offset >= 0 && offset < 2.0) eventTime = relativeTime - offset;
             }
@@ -355,11 +356,16 @@ void requestLoop(Shared &s, yarp::os::BufferedPort<Mono> &output) {
             {
                 std::lock_guard<std::mutex> lk(s.requestMutex);
                 if (!s.pending) canSend = true;
+                else if (std::chrono::duration<double>(Clock::now() - s.pending->started).count() > 10.0) {
+                    std::cerr << "[ERROR] Inference timed out after 10 seconds. Stopping MoveEnetOFK.\n";
+                    s.inferenceTimedOut.store(true);
+                    s.running.store(false);
+                    stopRequested.store(true);
+                    break;
+                }
                 else if (!s.pending->warned &&
-                         std::chrono::duration<double>(Clock::now() -
-                             s.pending->started).count() > 2.0) {
-                    std::cerr << "[WARN] Inference response exceeded 2 seconds; "
-                                 "no additional frames queued. Check Python logs.\n";
+                         std::chrono::duration<double>(Clock::now() - s.pending->started).count() > 2.0) {
+                    std::cerr << "[WARN] Inference response exceeded 2 seconds. No additional frames queued.\n";
                     s.pending->warned = true;
                 }
             }
@@ -400,9 +406,9 @@ bool decodeSkeleton(const yarp::os::Bottle &msg, const Config &cfg,
     const yarp::os::Bottle *a = msg.get(1).asList();
     if (!a || a->size() != 39) return false;
     for (int i = 0; i < 13; ++i) {
-        const double x = a->get(2 * i).asFloat64();
-        const double y = a->get(2 * i + 1).asFloat64();
-        double conf = a->get(26 + i).asFloat64();
+    const double x = a->get(2 * i).asFloat64();
+    const double y = a->get(2 * i + 1).asFloat64();
+    double conf = a->get(26 + i).asFloat64();
         if (!std::isfinite(conf) || !isUpperJoint(i) ||
             conf < cfg.confidenceThreshold || !validCoord(x, y, cfg)) {
             joints[i] = {0, 0};
@@ -417,13 +423,13 @@ bool decodeSkeleton(const yarp::os::Bottle &msg, const Config &cfg,
 
 // Published at the source estimator's rate (not the GUI's f_vis).
 void publishPose(yarp::os::BufferedPort<yarp::os::Bottle> &port,
-                 const char *type, const hpecore::skeleton13 &pose,
-                 const std::array<double, 13> &confidence, int id, double ts);
+                  const char *type, const hpecore::skeleton13 &pose,
+                  const std::array<double, 13> &confidence, int id, double ts);
 
 void responseLoop(Shared &s, yarp::os::BufferedPort<yarp::os::Bottle> &input,
                   yarp::os::BufferedPort<yarp::os::Bottle> &rawPosePort) {
     while (s.running.load() && !stopRequested.load()) {
-        const yarp::os::Bottle *msg = input.read(true);
+    const yarp::os::Bottle *msg = input.read(true);
         if (!msg) break;
         yarp::os::Stamp stamp;
         if (!input.getEnvelope(stamp)) {
@@ -515,7 +521,7 @@ void flowLoop(Shared &s,
                 if (!s.tracker.poseIsInitialised()) {
                     s.flowEstimator.prev_update_ts = ts;
                 } else {
-                    auto pose = s.tracker.query();
+                auto pose = s.tracker.query();
                     for (int j = 0; j < 13; ++j) {
                         if (!isUpperJoint(j) || s.lastDetection[j] < 0 ||
                             ts - s.lastDetection[j] > s.cfg.trackTimeout ||
@@ -568,7 +574,7 @@ void flowLoop(Shared &s,
 }
 
 void publishMono(yarp::os::BufferedPort<Mono> &port, const cv::Mat &mono,
-                 int id, double ts) {
+    int id, double ts) {
     if (port.getOutputCount() == 0) return;
     Mono &img = port.prepare();
     img.resize(mono.cols, mono.rows);
@@ -581,7 +587,7 @@ void publishMono(yarp::os::BufferedPort<Mono> &port, const cv::Mat &mono,
 }
 
 void publishOverlay(yarp::os::BufferedPort<Rgb> &port, const cv::Mat &rgb,
-                    int id, double ts) {
+    int id, double ts) {
     if (port.getOutputCount() == 0) return;
     Rgb &img = port.prepare();
     img.resize(rgb.cols, rgb.rows);
@@ -594,8 +600,8 @@ void publishOverlay(yarp::os::BufferedPort<Rgb> &port, const cv::Mat &rgb,
 }
 
 void publishPose(yarp::os::BufferedPort<yarp::os::Bottle> &port,
-                 const char *type, const hpecore::skeleton13 &pose,
-                 const std::array<double, 13> &confidence, int id, double ts) {
+    const char *type, const hpecore::skeleton13 &pose,
+    const std::array<double, 13> &confidence, int id, double ts) {
     if (port.getOutputCount() == 0) return;
     auto &msg = port.prepare();
     msg.clear();
@@ -615,10 +621,10 @@ void publishPose(yarp::os::BufferedPort<yarp::os::Bottle> &port,
 // crosses are the OF+KF tracker estimate. Pixel coordinates and confidence
 // have already been validated by decodeSkeleton()/the pose mask.
 void drawUpperPose(cv::Mat &bgr, const hpecore::skeleton13 &pose,
-                   const std::array<double, 13> &confidence,
-                   const Config &cfg, const cv::Scalar &color,
-                   int lineThickness, bool drawCircles) {
-    const auto visible = [&](int id) {
+        const std::array<double, 13> &confidence,
+        const Config &cfg, const cv::Scalar &color,
+        int lineThickness, bool drawCircles) {
+        const auto visible = [&](int id) {
         return confidence[id] > 0 && validCoord(pose[id].u, pose[id].v, cfg);
     };
     const auto point = [&](int id) {
@@ -675,8 +681,8 @@ void visualizationLoop(Shared &s,
         const double rateWindow =
             std::chrono::duration<double>(now - lastRateCheck).count();
         if (rateWindow >= 1.0) {
-            const auto net = s.modelRepliesReceived.load();
-            const auto flow = s.flowSteps.load();
+        const auto net = s.modelRepliesReceived.load();
+        const auto flow = s.flowSteps.load();
             achievedNetHz = (net - previousNetReplies) / rateWindow;
             achievedFlowHz = (flow - previousFlowSteps) / rateWindow;
             previousNetReplies = net;
@@ -686,7 +692,7 @@ void visualizationLoop(Shared &s,
         cv::Mat eros;
         double ts = 0, sourceTs = 0;
         if (snapshotEROS(s, eros, ts, sourceTs)) {
-            const int id = ++seq;
+        const int id = ++seq;
             hpecore::skeleton13 pose{};
             hpecore::skeleton13_vel velocity{};
             std::array<double, 13> conf{};
@@ -745,7 +751,7 @@ void visualizationLoop(Shared &s,
                               cv::Point(std::min(410, bgr.cols - 1),
                                         std::min(52, bgr.rows - 1)),
                               cv::Scalar(0, 0, 0), cv::FILLED);
-                const std::string redLabel =
+                    const std::string redLabel =
                     "MoveEnet RED | " +
                     std::to_string(static_cast<int>(std::lround(achievedNetHz))) +
                     "/" +
@@ -754,7 +760,7 @@ void visualizationLoop(Shared &s,
                     (rawPoseRecent
                          ? std::to_string(static_cast<int>(std::lround(rawAgeMs))) + " ms old"
                          : std::string("no recent detection"));
-                const std::string greenLabel =
+                    const std::string greenLabel =
                     "OF+KF GREEN | " +
                     std::to_string(static_cast<int>(std::lround(achievedFlowHz))) +
                     "/" +
@@ -882,5 +888,5 @@ int main(int argc, char *argv[]) {
     erosOutput.close(); overlayOutput.close(); skeletonOutput.close();
     velocityOutput.close(); movenetSkeletonOutput.close();
     ofkSkeletonOutput.close();
-    return 0;
+    return state.inferenceTimedOut.load() ? 1 : 0;
 }

@@ -2,12 +2,18 @@
 
 set -Eeuo pipefail
 
-# Print launcher and child-process output only with --verbose.
+# Preserve stdout for important status messages.
+exec 3>&1
+
+# Quiet by default, verbose output only when requested.
 if [[ "${1:-}" == "--verbose" ]]; then
     shift
+    exec 4>&1
 else
-    exec >/dev/null 2>&1
+    exec >/dev/null
+    exec 4>/dev/null
 fi
+
 if (( $# != 0 )); then
     printf 'Usage: %s [--verbose]\n' "${0##*/}" >&2
     exit 2
@@ -35,10 +41,16 @@ READER_WAIT_SECONDS="${READER_WAIT_SECONDS:-15}"
 
 READER_PID=""
 CLEANUP_DONE=0
+CLEANUP_ARMED=0
 
 log()
 {
     printf '[INFO] %s\n' "$*"
+}
+
+status()
+{
+    printf '[INFO] %s\n' "$*" >&3
 }
 
 error()
@@ -75,19 +87,27 @@ wait_for_port()
 
 stop_local_reader()
 {
-    if [[ -n "$READER_PID" ]] && kill -0 "$READER_PID" 2>/dev/null; then
-        kill -TERM "$READER_PID" 2>/dev/null || true
-        wait "$READER_PID" 2>/dev/null || true
-    fi
+    if [[ -n "$READER_PID" ]]; then
+        if kill -0 "$READER_PID" 2>/dev/null; then
+            kill -TERM "$READER_PID" 2>/dev/null || true
+        fi
 
-    pkill -x eventCam_reader 2>/dev/null || true
-    READER_PID=""
+        wait "$READER_PID" 2>/dev/null || true
+        READER_PID=""
+    fi
 }
 
+# Normal shutdown: stop the registered remote command through YARP.
 stop_zynq_grabber()
 {
     yarp run --on "$REMOTE_RUN_SERVER" \
         --sigterm "$REMOTE_COMMAND_TAG" >/dev/null 2>&1 || true
+}
+
+# Startup recovery: retain the existing SSH fallback for orphaned processes.
+recover_zynq_grabber()
+{
+    stop_zynq_grabber
 
     ssh "$REMOTE_SSH_HOST" '
         pids=$(pgrep -f "[z]ynqGrabber" || true)
@@ -112,15 +132,18 @@ unregister_port()
 
 cleanup()
 {
-    if (( CLEANUP_DONE )); then
+    if (( ! CLEANUP_ARMED || CLEANUP_DONE )); then
         return
     fi
 
     CLEANUP_DONE=1
-    printf '\n'
+
+    if [[ "${PRIMI_SENSOR_GROUP:-0}" != 1 ]]; then printf '\n' >&3; fi
+    status "Stopping event-camera pipeline..."
 
     yarp disconnect "$LEFT_REMOTE_SOURCE" "$LEFT_LOCAL_INPUT" \
         >/dev/null 2>&1 || true
+
     yarp disconnect "$RIGHT_REMOTE_SOURCE" "$RIGHT_LOCAL_INPUT" \
         >/dev/null 2>&1 || true
 
@@ -129,11 +152,15 @@ cleanup()
 
     log "Stopping zynqGrabber"
     stop_zynq_grabber
+
+    status "Event-camera pipeline stopped."
 }
 
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Preliminary checks must not affect existing acquisition processes.
 
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
@@ -151,9 +178,20 @@ if ! port_exists "$REMOTE_RUN_SERVER"; then
     exit 1
 fi
 
-log "Stopping previous event-camera processes"
-stop_local_reader
-stop_zynq_grabber
+# Do not terminate a reader belonging to another invocation.
+if pgrep -x eventCam_reader >/dev/null 2>&1; then
+    error "An eventCam_reader process is already running."
+    error "Stop the existing acquisition before starting another instance."
+    exit 1
+fi
+
+CLEANUP_ARMED=1
+
+status "Starting event-camera pipeline..."
+
+# Recover remote acquisition processes left by previous executions.
+log "Recovering previous remote event-camera processes"
+recover_zynq_grabber
 
 log "Removing stale event-camera port registrations"
 unregister_port "$LEFT_REMOTE_SOURCE"
@@ -167,12 +205,16 @@ sleep 1
 
 log "Starting zynqGrabber on ${REMOTE_RUN_SERVER}"
 
-yarp run --on "$REMOTE_RUN_SERVER" \
+if ! yarp run --on "$REMOTE_RUN_SERVER" \
     --as "$REMOTE_COMMAND_TAG" \
-    --cmd "$REMOTE_COMMAND"
+    --cmd "$REMOTE_COMMAND" >&4 2>&4; then
+    error "Could not start zynqGrabber on $REMOTE_RUN_SERVER."
+    exit 1
+fi
 
 wait_for_port "$LEFT_REMOTE_SOURCE" "$REMOTE_WAIT_SECONDS" \
     "left event-camera source"
+
 wait_for_port "$RIGHT_REMOTE_SOURCE" "$REMOTE_WAIT_SECONDS" \
     "right event-camera source"
 
@@ -182,10 +224,13 @@ READER_PID=$!
 
 wait_for_port "$LEFT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
     "left event-camera reader input"
+
 wait_for_port "$RIGHT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
     "right event-camera reader input"
+
 wait_for_port "$LEFT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
     "left local event output"
+
 wait_for_port "$RIGHT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
     "right local event output"
 
@@ -193,10 +238,10 @@ log "Connecting remote event streams"
 yarp connect "$LEFT_REMOTE_SOURCE" "$LEFT_LOCAL_INPUT" "$CARRIER"
 yarp connect "$RIGHT_REMOTE_SOURCE" "$RIGHT_LOCAL_INPUT" "$CARRIER"
 
-log "Event-camera pipeline is running"
+status "Event-camera pipeline is running. Press Ctrl+C to stop."
+
 log "Local outputs:"
 log "  $LEFT_LOCAL_OUTPUT"
 log "  $RIGHT_LOCAL_OUTPUT"
-log "Press Ctrl+C to stop"
 
 wait "$READER_PID"

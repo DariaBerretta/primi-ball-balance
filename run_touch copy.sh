@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+exec 3>&1
 
 # Print launcher and child-process output only with --verbose.
 if [[ "${1:-}" == "--verbose" ]]; then
     shift
 else
-    exec >/dev/null 2>&1
+    exec >/dev/null
 fi
 if (( $# != 0 )); then
     printf 'Usage: %s [--verbose]\n' "${0##*/}" >&2
     exit 2
 fi
+printf '[INFO] Starting tactile acquisition... Press Ctrl+C to stop.\n' >&3
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/touch_reader}"
 
+# LEFT_RAW_PORT="${LEFT_RAW_PORT:-/icub/skin/left_hand}"
 RIGHT_RAW_PORT="${RIGHT_RAW_PORT:-/icub/skin/right_hand}"
+# LEFT_COMPENSATED_SOURCE="${LEFT_COMPENSATED_SOURCE:-/icub/skin/left_hand_comp}"
 RIGHT_COMPENSATED_SOURCE="${RIGHT_COMPENSATED_SOURCE:-/icub/skin/right_hand_comp}"
+# LEFT_LOCAL_INPUT="${LEFT_LOCAL_INPUT:-/primi-ball-balance/skin/left_hand:i}"
 RIGHT_LOCAL_INPUT="${RIGHT_LOCAL_INPUT:-/primi-ball-balance/skin/right_hand:i}"
+# LEFT_LOCAL_OUTPUT="${LEFT_LOCAL_OUTPUT:-/primi-ball-balance/skin/left_hand/compensated:o}"
 RIGHT_LOCAL_OUTPUT="${RIGHT_LOCAL_OUTPUT:-/primi-ball-balance/skin/right_hand/compensated:o}"
 
 REMOTE_RUN_SERVER="${REMOTE_RUN_SERVER:-/icub-head}"
@@ -61,27 +67,39 @@ trap 'exit 143' TERM
 yarp where >/dev/null || { echo "YARP name server unavailable" >&2; exit 1; }
 [[ -x "$READER_EXECUTABLE" ]] || { echo "Missing reader: $READER_EXECUTABLE" >&2; exit 1; }
 port_exists "$REMOTE_RUN_SERVER" || { echo "Missing run server: $REMOTE_RUN_SERVER" >&2; exit 1; }
-port_exists "$RIGHT_RAW_PORT" || { echo "Missing raw skin port: $RIGHT_RAW_PORT" >&2; exit 1; }
+# for port in "$LEFT_RAW_PORT" "$RIGHT_RAW_PORT"; do
+for port in "$RIGHT_RAW_PORT"; do
+    port_exists "$port" || { echo "Missing raw skin port: $port" >&2; exit 1; }
+done
 
 pkill -x touch_reader 2>/dev/null || true
-yarp name unregister "$RIGHT_LOCAL_INPUT" >/dev/null 2>&1 || true
-yarp name unregister "$RIGHT_LOCAL_OUTPUT" >/dev/null 2>&1 || true
+# for port in "$LEFT_LOCAL_INPUT" "$RIGHT_LOCAL_INPUT" "$LEFT_LOCAL_OUTPUT" "$RIGHT_LOCAL_OUTPUT"; do
+for port in "$RIGHT_LOCAL_INPUT" "$RIGHT_LOCAL_OUTPUT"; do
+    yarp name unregister "$port" >/dev/null 2>&1 || true
+done
 
+# if port_exists "$LEFT_COMPENSATED_SOURCE" && port_exists "$RIGHT_COMPENSATED_SOURCE"; then
 if port_exists "$RIGHT_COMPENSATED_SOURCE"; then
     echo "Using existing compensated skin streams"
+# elif port_exists "$LEFT_COMPENSATED_SOURCE" || port_exists "$RIGHT_COMPENSATED_SOURCE"; then
+#     echo "Only one compensated skin stream is available" >&2
+#     exit 1
 else
     yarp run --on "$REMOTE_RUN_SERVER" --sigterm "$REMOTE_SKINMANAGER_TAG" >/dev/null 2>&1 || true
     yarp run --on "$REMOTE_RUN_SERVER" --as "$REMOTE_SKINMANAGER_TAG" --cmd "$REMOTE_SKINMANAGER_COMMAND"
     REMOTE_SKINMANAGER_STARTED=1
+    # wait_for_port "$LEFT_COMPENSATED_SOURCE" "$SKIN_WAIT_SECONDS"
     wait_for_port "$RIGHT_COMPENSATED_SOURCE" "$SKIN_WAIT_SECONDS"
 fi
 
-
 "$READER_EXECUTABLE" &
 READER_PID=$!
-for port in  "$RIGHT_LOCAL_INPUT" "$RIGHT_LOCAL_OUTPUT"; do
+# for port in "$LEFT_LOCAL_INPUT" "$RIGHT_LOCAL_INPUT" "$LEFT_LOCAL_OUTPUT" "$RIGHT_LOCAL_OUTPUT"; do
+for port in "$RIGHT_LOCAL_INPUT" "$RIGHT_LOCAL_OUTPUT"; do
     wait_for_port "$port" "$READER_WAIT_SECONDS"
 done
+# yarp connect "$LEFT_COMPENSATED_SOURCE" "$LEFT_LOCAL_INPUT" "$REMOTE_CARRIER"
 yarp connect "$RIGHT_COMPENSATED_SOURCE" "$RIGHT_LOCAL_INPUT" "$REMOTE_CARRIER"
 echo "Tactile acquisition running; skin visualization is owned by run_monitor.sh"
+printf '[INFO] Tactile acquisition running. Press Ctrl+C to stop.\n' >&3
 wait "$READER_PID"

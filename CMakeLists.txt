@@ -81,3 +81,6 @@ target_link_libraries(event_control_gui PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     YARP::YARP_os YARP::YARP_init
     ev::event-driven ${OpenCV_LIBS} Threads::Threads)
+
+
+add_subdirectory(tools/camera_control)
