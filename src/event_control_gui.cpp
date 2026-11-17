@@ -8,6 +8,16 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QInputDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLineEdit>
+#include <QMessageBox>
+#include <QSaveFile>
+#include <QSignalBlocker>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -216,9 +226,12 @@ struct Camera {
                 // SAE is a timestamp surface; only its DISPLAY mapping uses
                 // exponential temporal decay. This does not modify ev::SAE.
                 cv::Mat stamps = sae.getSurface();
-                cv::Mat age = lastEventTime - stamps;
+                cv::Mat age;
+                stamps.convertTo(age, CV_64F);
+                age = lastEventTime - age;
                 cv::max(age, cv::Scalar(0), age);
-                cv::exp(-age / 0.1, age);
+                age = -age / 0.1;
+                cv::exp(age, age);
                 age.setTo(0, stamps == 0);
                 age.convertTo(processed, CV_8U, 255.0);
             } else {
@@ -276,6 +289,13 @@ class Window : public QMainWindow {
     QCheckBox *noise[2]{}, *linkHardware{}, *linkEros{};
     QSlider *sensitivity[2]{}, *refractory[2]{}, *kernel[2]{}, *decay[2]{}, *accumulation{};
     QPushButton* apply{};
+    QComboBox* profileChoice{};
+    QLabel* profileState{};
+    QJsonObject profiles, defaults, loadedSettings;
+    QString lastProfile;
+    const QString profilePath = QDir::cleanPath(QCoreApplication::applicationDirPath() +
+                                                "/../config/event_camera_profiles.json");
+    bool loadingProfile{false};
     yarp::os::RpcClient rpc;
     std::future<QString> pending;
     QString rpcMessage;
@@ -297,8 +317,25 @@ public:
         grid->setRowStretch(1, 1);
         root->addLayout(grid, 1);
 
+        auto* profilesRow = new QHBoxLayout;
+        profileChoice = new QComboBox;
+        profileChoice->setMinimumWidth(180);
+        auto* loadButton = new QPushButton("Load");
+        auto* saveButton = new QPushButton("Save");
+        auto* defaultsButton = new QPushButton("Defaults");
+        auto* deleteButton = new QPushButton("Delete");
+        profileState = new QLabel;
+        profilesRow->addWidget(new QLabel("Profile:"));
+        profilesRow->addWidget(profileChoice);
+        profilesRow->addWidget(loadButton);
+        profilesRow->addWidget(saveButton);
+        profilesRow->addWidget(defaultsButton);
+        profilesRow->addWidget(deleteButton);
+        profilesRow->addWidget(profileState, 1);
+        root->addLayout(profilesRow);
+
         auto* settings = new QHBoxLayout;
-        auto* hardwareBox = new QGroupBox("Camera hardware (Ultrascale I2C RPC)");
+        auto* hardwareBox = new QGroupBox("Camera hardware (zynqGrabber RPC)");
         auto* hardware = new QFormLayout(hardwareBox);
         linkHardware = new QCheckBox("Link cameras");
         linkHardware->setChecked(true);
@@ -371,6 +408,79 @@ public:
         connect(accumulation, &QSlider::valueChanged, this, [this](int n) {
             for (auto& c : cameras) c.windowMs = n;
         });
+        // Profile loading updates the GUI and local processing, never hardware biases.
+        defaults = captureSettings();
+        readProfiles();
+
+        connect(loadButton, &QPushButton::clicked, this, [this] {
+            if (profileChoice->currentIndex() == 0) return;
+            const QString name = profileChoice->currentText();
+            applySettings(profiles.value(name).toObject());
+            loadedSettings = captureSettings();
+            lastProfile = name;
+            if (!writeProfiles()) QMessageBox::warning(this, "Save failed", profilePath);
+            updateProfileState();
+        });
+        connect(saveButton, &QPushButton::clicked, this, [this] {
+            QString name = profileChoice->currentText();
+            if (profileChoice->currentIndex() == 0) {
+                bool ok = false;
+                name = QInputDialog::getText(this, "New profile", "Profile name:",
+                                             QLineEdit::Normal, "", &ok).trimmed();
+                if (!ok || name.isEmpty()) return;
+                if (name == "New Profile" || profiles.contains(name)) {
+                    QMessageBox::warning(this, "Profile exists", "Choose another name.");
+                    return;
+                }
+            } else if (QMessageBox::question(this, "Overwrite profile",
+                    QString("Overwrite '%1' with current settings?").arg(name),
+                    QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel)
+                       != QMessageBox::Yes) return;
+
+            const auto settings = captureSettings();
+            profiles.insert(name, settings);
+            lastProfile = name;
+            loadedSettings = settings;
+            refreshProfileChoice(name);
+            if (!writeProfiles()) QMessageBox::warning(this, "Save failed", profilePath);
+            updateProfileState();
+        });
+        connect(defaultsButton, &QPushButton::clicked, this, [this] {
+            applySettings(defaults);
+        });
+        connect(deleteButton, &QPushButton::clicked, this, [this] {
+            if (profileChoice->currentIndex() == 0) return;
+            const QString name = profileChoice->currentText();
+            if (QMessageBox::question(this, "Delete profile",
+                    QString("Delete profile '%1'?").arg(name),
+                    QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel)
+                != QMessageBox::Yes) return;
+            profiles.remove(name);
+            if (lastProfile == name) lastProfile.clear();
+            refreshProfileChoice("");
+            if (!writeProfiles()) QMessageBox::warning(this, "Save failed", profilePath);
+            updateProfileState();
+        });
+        connect(profileChoice, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this] { updateProfileState(); });
+        for (int s = 0; s < 2; ++s) {
+            for (auto* control : {sensitivity[s], refractory[s], kernel[s], decay[s]})
+                connect(control, &QSlider::valueChanged,
+                        this, [this] { updateProfileState(); });
+            for (auto* control : {rawModes[s], representations[s]})
+                connect(control, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                        this, [this] { updateProfileState(); });
+            connect(noise[s], &QCheckBox::toggled,
+                    this, [this] { updateProfileState(); });
+        }
+        connect(accumulation, &QSlider::valueChanged,
+                this, [this] { updateProfileState(); });
+        connect(linkHardware, &QCheckBox::toggled,
+                this, [this] { updateProfileState(); });
+        connect(linkEros, &QCheckBox::toggled,
+                this, [this] { updateProfileState(); });
+        updateProfileState();
+
         rpc.open("/primi-ball-balance/eventControl/rpc:o");
         connect(apply, &QPushButton::clicked, this, [this] {
             if (pending.valid()) return;
@@ -378,8 +488,8 @@ public:
                                       {sensitivity[1]->value(), refractory[1]->value()}};
             apply->setEnabled(false);
             pending = std::async(std::launch::async, [this, values] {
-                if (!yarp::os::Network::connect(rpc.getName(), "/primi-ball-balance/cameraControl/rpc"))
-                    return QString("Camera RPC unavailable; start camera_control on Ultrascale.");
+                if (!yarp::os::Network::connect(rpc.getName(), "/zynqGrabber/control/rpc"))
+                    return QString("Camera RPC unavailable; check Ultrascale zynqGrabber.");
                 int accepted = 0;
                 for (int s = 0; s < 2; ++s)
                     for (int p = 0; p < 2; ++p) {
@@ -422,6 +532,117 @@ public:
         });
         timer->start(33);
     }
+    QJsonObject captureSettings() const {
+        QJsonObject hardware, processing, raw;
+        for (int s = 0; s < 2; ++s) {
+            const QString side = s ? "right" : "left";
+            hardware.insert(side, QJsonObject{
+                {"sensitivity", sensitivity[s]->value()},
+                {"refractory", refractory[s]->value()}
+            });
+            processing.insert(side, QJsonObject{
+                {"representation", representations[s]->currentText()},
+                {"kernel", kernel[s]->value()},
+                {"decay", decay[s]->value()},
+                {"salt_pepper", noise[s]->isChecked()}
+            });
+            raw.insert(side, rawModes[s]->currentText());
+        }
+        return QJsonObject{
+            {"hardware", hardware},
+            {"processing", processing},
+            {"visualization", QJsonObject{
+                {"window_ms", accumulation->value()}, {"raw_mode", raw}
+            }},
+            {"linking", QJsonObject{
+                {"hardware", linkHardware->isChecked()},
+                {"eros", linkEros->isChecked()}
+            }}
+        };
+    }
+
+    void applySettings(const QJsonObject& settings) {
+        loadingProfile = true;
+        QSignalBlocker blockHardware(linkHardware), blockEros(linkEros);
+        linkHardware->setChecked(false);
+        linkEros->setChecked(false);
+        const auto hardware = settings.value("hardware").toObject();
+        const auto processing = settings.value("processing").toObject();
+        const auto visualization = settings.value("visualization").toObject();
+        const auto raw = visualization.value("raw_mode").toObject();
+        for (int s = 0; s < 2; ++s) {
+            const QString side = s ? "right" : "left";
+            const auto hw = hardware.value(side).toObject();
+            const auto proc = processing.value(side).toObject();
+            sensitivity[s]->setValue(hw.value("sensitivity").toInt(sensitivity[s]->value()));
+            refractory[s]->setValue(hw.value("refractory").toInt(refractory[s]->value()));
+            int index = representations[s]->findText(proc.value("representation").toString());
+            if (index >= 0) representations[s]->setCurrentIndex(index);
+            index = rawModes[s]->findText(raw.value(side).toString());
+            if (index >= 0) rawModes[s]->setCurrentIndex(index);
+            noise[s]->setChecked(proc.value("salt_pepper").toBool(noise[s]->isChecked()));
+            kernel[s]->setValue(proc.value("kernel").toInt(kernel[s]->value()));
+            decay[s]->setValue(proc.value("decay").toInt(decay[s]->value()));
+        }
+        accumulation->setValue(visualization.value("window_ms")
+                               .toInt(accumulation->value()));
+        const auto linking = settings.value("linking").toObject();
+        linkHardware->setChecked(linking.value("hardware").toBool(true));
+        linkEros->setChecked(linking.value("eros").toBool(true));
+        loadingProfile = false;
+        updateProfileState();
+    }
+
+    void refreshProfileChoice(const QString& selected) {
+        QSignalBlocker block(profileChoice);
+        profileChoice->clear();
+        profileChoice->addItem("New Profile");
+        QStringList names = profiles.keys();
+        names.sort(Qt::CaseInsensitive);
+        profileChoice->addItems(names);
+        const int index = profileChoice->findText(selected);
+        profileChoice->setCurrentIndex(index < 0 ? 0 : index);
+    }
+
+    bool writeProfiles() {
+        QSaveFile file(profilePath);
+        if (!file.open(QIODevice::WriteOnly)) return false;
+        const QJsonObject root{{"factory_defaults", defaults},
+                               {"last_profile", lastProfile}, {"profiles", profiles}};
+        if (file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
+            return false;
+        return file.commit();
+    }
+
+    void readProfiles() {
+        QFile file(profilePath);
+        if (file.open(QIODevice::ReadOnly)) {
+            QJsonParseError error;
+            const auto doc = QJsonDocument::fromJson(file.readAll(), &error);
+            if (error.error == QJsonParseError::NoError && doc.isObject()) {
+                const auto root = doc.object();
+                // Built-in defaults remain authoritative; saved profiles are editable.
+                profiles = root.value("profiles").toObject();
+                lastProfile = root.value("last_profile").toString();
+            } else {
+                QMessageBox::warning(this, "Invalid profile file",
+                                     "Cannot parse " + profilePath);
+            }
+        }
+        refreshProfileChoice(lastProfile);
+        if (!lastProfile.isEmpty() && profiles.contains(lastProfile))
+            applySettings(profiles.value(lastProfile).toObject());
+        else
+            applySettings(defaults);
+        loadedSettings = captureSettings();
+    }
+
+    void updateProfileState() {
+        if (loadingProfile || !profileState) return;
+        profileState->setText(captureSettings() != loadedSettings ?
+                              "Unsaved changes *" : "");
+    }
+
     ~Window() override {
         for (auto& c : cameras) c.stop();
         if (pending.valid()) pending.wait();

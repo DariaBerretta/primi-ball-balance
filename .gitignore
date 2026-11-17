@@ -4,3 +4,12 @@ build/
 .venv/
 logs/
 data/
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local camera profiles
+config/event_camera_profiles.json
+
+# Local backups
+*.bak

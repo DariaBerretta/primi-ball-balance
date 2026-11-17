@@ -1,50 +1,53 @@
 # Event camera control GUI
 
-## Purpose
+## Overview
 
-A standalone Qt viewer for both locally republished event streams and their EROS representations. It subscribes only to `/primi-ball-balance/eventCam/{left,right}/raw:o` and does not create extra robot-to-laptop event connections or restart acquisition.
+`event_control_gui` runs on the laptop (`iiticublap267`) and displays the two raw event streams and the selected processed representations. It connects to the locally republished YARP outputs:
 
-## Build and run
+```
+/primi-ball-balance/eventCam/left/raw:o
+/primi-ball-balance/eventCam/right/raw:o
+```
 
-Add `CMakeLists.event_control.txt` to the existing root `CMakeLists.txt` and rebuild:
+The existing acquisition pipeline and `zynqGrabber` are independent of the GUI.
+
+A separate `camera_control` executable runs on `icub-ultrascale`. It controls the GEN3 camera biases through `/dev/i2c-0` (left `0x10`, right `0x11`) and exposes `/primi-ball-balance/cameraControl/rpc`. This does not require modifying `zynqGrabber` or the installed `event-driven` library.
+
+## Build and run the laptop GUI
 
 ```bash
 cmake -S . -B build
-cmake --build build -j"$(nproc)" --target event_control_gui
+cmake --build build --target event_control_gui -j"$(nproc)"
+./run_eventCam.sh                 # in another terminal, when not already running
 ./scripts/run_event_control_gui.sh
 ```
 
-Requires the existing YARP, event-driven, OpenCV, and Qt5/Qt6 Widgets development packages. Start `./run_eventCam.sh` in a separate terminal. The viewer reconnects to the local streams after acquisition restarts.
+The GUI requires Qt Widgets, YARP, OpenCV, and `event-driven` as configured by the root `CMakeLists.txt`.
 
-## Controls
+## Ultrascale camera controller
 
-* Four panes: left/right raw events and left/right EROS.
-* Raw accumulation is a host **arrival-time display window** in milliseconds. Event polarity is color coded.
-* EROS is calculated from raw (unfiltered) events using the event-driven algorithm: multiply the event's padded spatial neighbourhood by `decay^(1/kernel)` and set the centre to 1. Changing kernel or decay resets the respective surface.
-* Left/right link checkboxes synchronize sliders.
-* Camera settings are sent **only upon clicking Apply camera settings**. These are hardware bias-control values, **not calibrated physical units**.
-
-## Robot-side live control
-
-`patches/zynqGrabber-live-bias-control.patch` is a proposed change to `robotology/event-driven`, introducing `/zynqGrabber/control/rpc` in `zynqModule.cpp`. It uses the existing camera-specific I2C operations and accepts Bottle RPC commands such as `set sensitivity left 70` and `set refractory right 1`.
-
-Apply it in the **actual Ultrascale checkout** from which `zynqGrabber` is built:
+The controller's source is maintained in `tools/camera_control/` on the laptop. The matching source and `CMakeLists.txt` are copied to `~/primi-camera-control/` on the Ultrascale and compiled there as a separate CMake project:
 
 ```bash
-cd /path/to/robotology-event-driven
-git apply --check /path/to/primi-ball-balance/patches/zynqGrabber-live-bias-control.patch
-git apply /path/to/primi-ball-balance/patches/zynqGrabber-live-bias-control.patch
-# Rebuild and install zynqGrabber using the established Ultrascale process.
+cmake -S ~/primi-camera-control -B ~/primi-camera-control/build
+cmake --build ~/primi-camera-control/build -j2
+~/primi-camera-control/build/camera_control --inspect
 ```
 
-**Do not deploy without first reviewing and compiling on the installed version.** The upstream bias setters do not return register-write success, so a positive RPC reply does not prove the hardware accepted the change. Test conservatively with robot motion disabled.
+`--inspect` identifies both cameras and reads their bias registers. The service can be started with `--serve` (read-only) or `--serve --allow-writes` (bias changes enabled). The GUI launcher may start it through the existing YARP run server; that requires the locally updated `scripts/run_event_control_gui.sh` to have been installed.
 
-## Limitations and validation
+**Hardware changes are not applied when loading GUI settings.** The **Apply camera settings** button sends the four displayed sensitivity/refractory values to the controller. The register readback confirms programmed values but not the physical effect or absence of transients. Keep robot motion disabled when testing bias adjustments.
 
-* EROS here is **independent** of `moveEnetOFK_online`: changing GUI parameters does not alter MoveEnet's own filtered EROS processing.
-* The `--filter` HPU acquisition setting remains startup-only. There is no verified safe live setter yet.
-* The upstream `ev::EROS` caches the decay with a function-local static, so the GUI implements its spatial update directly without that stale-parameter behavior.
-* Image size is currently 640x480. Use one GUI instance at a time due to fixed YARP port names.
-* The new code **has not been compiled or exercised against the robot's YARP/event-driven/Qt versions or camera hardware**.
+## GUI controls and saved profiles
 
-Manual acceptance checks: build on `iiticublap267`, display live left/right frames and event rates, change each EROS slider individually, test kernel changes without crashes, restart acquisition and check reconnection, then validate the robot-side RPC and verify sensor response before relying on live hardware control.
+- The top row renders raw events. The raw display time window is a **software arrival-time window**, not a camera or HPU setting.
+- The lower row uses the installed `ev::EROS`, `ev::SAE`, and `ev::TOS` implementations.
+- The optional salt-and-pepper filter uses the installed `ev::vNoiseFilter` **before the processed representation**, not the raw display.
+- EROS kernel and decay changes update GUI processing only. They do not update MoveEnet's own EROS representation.
+- On GUI versions with profile management, the `config/event_camera_profiles.json` file stores named profiles and the last selected profile. **New Profile** creates a new entry; **Save** on an existing profile requires overwrite confirmation; **Defaults** changes current GUI values without overwriting a profile. This machine-specific file is ignored by Git.
+
+The profile-enabled GUI revision and the automated controller-launch script may exist only in the laptop checkout until committed and pushed. Check `git status` before replacing local files with versions from GitHub.
+
+## Limitations
+
+`zynqGrabber --filter` controls the acquisition-side temporal filter and remains a startup-time option. GUI controls do not modify that setting. The installed `event-driven` EROS/TOS implementation may cache certain parameters in static variables; independently configured left/right settings should be verified experimentally before treating them as equivalent to isolated representations.
