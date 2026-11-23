@@ -42,15 +42,6 @@ target_link_libraries(proprio_reader PRIVATE YARP::YARP_os YARP::YARP_sig YARP::
 add_executable(Robot_control src/Robot_control.cpp)
 target_link_libraries(Robot_control PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
 
-
-#============ Image Preprocessor Test ============
-add_executable(test_preprocessor src/test_preprocessor.cpp)
-target_link_libraries(test_preprocessor PRIVATE image_preprocessing)
-
-#============ Ball Detector Test ============
-add_executable(test_ball_detector src/test_ball_detector.cpp)
-target_link_libraries(test_ball_detector PRIVATE ball_detection)
-
 #============ Joint to XYZ Test ============
 add_executable(joint_to_xyz src/joint_to_xyz.cpp)
 target_link_directories(joint_to_xyz PRIVATE ${ICUB_LINK_DIRECTORIES})
@@ -84,3 +75,10 @@ target_link_libraries(event_control_gui PRIVATE
 
 
 add_subdirectory(tools/camera_control)
+
+#============ BMA400 USB/YARP Reader ============
+add_executable(bma400_reader src/bma400_reader.cpp)
+target_link_libraries(bma400_reader PRIVATE 
+    YARP::YARP_os 
+    YARP::YARP_init
+    )
