@@ -20,26 +20,26 @@ if (( $# != 0 )); then
 fi
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/eventCam_reader}"
+RELAY_EXECUTABLE="${RELAY_EXECUTABLE:-$PROJECT_DIR/build/event_relay}"
 
 REMOTE_RUN_SERVER="${REMOTE_RUN_SERVER:-/icub-ultrascale}"
 REMOTE_SSH_HOST="${REMOTE_SSH_HOST:-icub@icub-ultrascale}"
 REMOTE_COMMAND_TAG="${REMOTE_COMMAND_TAG:-zynqGrabber}"
 REMOTE_COMMAND="${REMOTE_COMMAND:-zynqGrabber --filter 0.0}"
 
-LEFT_REMOTE_SOURCE="${LEFT_REMOTE_SOURCE:-/zynqGrabber/left/AE:o}"
-RIGHT_REMOTE_SOURCE="${RIGHT_REMOTE_SOURCE:-/zynqGrabber/right/AE:o}"
+LEFT_ZYNQ_SOURCE="${LEFT_ZYNQ_SOURCE:-/zynqGrabber/left/AE:o}"
+RIGHT_ZYNQ_SOURCE="${RIGHT_ZYNQ_SOURCE:-/zynqGrabber/right/AE:o}"
 
-LEFT_LOCAL_INPUT="${LEFT_LOCAL_INPUT:-/primi-ball-balance/eventCam/left:i}"
-RIGHT_LOCAL_INPUT="${RIGHT_LOCAL_INPUT:-/primi-ball-balance/eventCam/right:i}"
-LEFT_LOCAL_OUTPUT="${LEFT_LOCAL_OUTPUT:-/primi-ball-balance/eventCam/left/raw:o}"
-RIGHT_LOCAL_OUTPUT="${RIGHT_LOCAL_OUTPUT:-/primi-ball-balance/eventCam/right/raw:o}"
+LEFT_EVENT_SINK="${LEFT_EVENT_SINK:-/primi-ball-balance/eventCameraStream/left/sink:i}"
+RIGHT_EVENT_SINK="${RIGHT_EVENT_SINK:-/primi-ball-balance/eventCameraStream/right/sink:i}"
+LEFT_EVENT_SOURCE="${LEFT_EVENT_SOURCE:-/primi-ball-balance/eventCameraStream/left/source:o}"
+RIGHT_EVENT_SOURCE="${RIGHT_EVENT_SOURCE:-/primi-ball-balance/eventCameraStream/right/source:o}"
 
 CARRIER="${CARRIER:-fast_tcp}"
 REMOTE_WAIT_SECONDS="${REMOTE_WAIT_SECONDS:-60}"
-READER_WAIT_SECONDS="${READER_WAIT_SECONDS:-15}"
+RELAY_WAIT_SECONDS="${RELAY_WAIT_SECONDS:-15}"
 
-READER_PID=""
+RELAY_PID=""
 CLEANUP_DONE=0
 CLEANUP_ARMED=0
 
@@ -87,13 +87,13 @@ wait_for_port()
 
 stop_local_reader()
 {
-    if [[ -n "$READER_PID" ]]; then
-        if kill -0 "$READER_PID" 2>/dev/null; then
-            kill -TERM "$READER_PID" 2>/dev/null || true
+    if [[ -n "$RELAY_PID" ]]; then
+        if kill -0 "$RELAY_PID" 2>/dev/null; then
+            kill -TERM "$RELAY_PID" 2>/dev/null || true
         fi
 
-        wait "$READER_PID" 2>/dev/null || true
-        READER_PID=""
+        wait "$RELAY_PID" 2>/dev/null || true
+        RELAY_PID=""
     fi
 }
 
@@ -141,10 +141,10 @@ cleanup()
     if [[ "${PRIMI_SENSOR_GROUP:-0}" != 1 ]]; then printf '\n' >&3; fi
     status "Stopping event-camera pipeline..."
 
-    yarp disconnect "$LEFT_REMOTE_SOURCE" "$LEFT_LOCAL_INPUT" \
+    yarp disconnect "$LEFT_ZYNQ_SOURCE" "$LEFT_EVENT_SINK" \
         >/dev/null 2>&1 || true
 
-    yarp disconnect "$RIGHT_REMOTE_SOURCE" "$RIGHT_LOCAL_INPUT" \
+    yarp disconnect "$RIGHT_ZYNQ_SOURCE" "$RIGHT_EVENT_SINK" \
         >/dev/null 2>&1 || true
 
     log "Stopping local event-camera reader"
@@ -160,15 +160,16 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Preliminary checks must not affect existing acquisition processes.
+# Check the cluster and local reader before touching remote camera state.
+# The subsequent recovery only runs once ownership of this launcher is clear.
 
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
     exit 1
 fi
 
-if [[ ! -x "$READER_EXECUTABLE" ]]; then
-    error "Event-camera reader not found: $READER_EXECUTABLE"
+if [[ ! -x "$RELAY_EXECUTABLE" ]]; then
+    error "Event-camera reader not found: $RELAY_EXECUTABLE"
     error "Build it with: cmake --build \"$PROJECT_DIR/build\" -j\"\$(nproc)\""
     exit 1
 fi
@@ -179,8 +180,8 @@ if ! port_exists "$REMOTE_RUN_SERVER"; then
 fi
 
 # Do not terminate a reader belonging to another invocation.
-if pgrep -x eventCam_reader >/dev/null 2>&1; then
-    error "An eventCam_reader process is already running."
+if pgrep -x event_relay >/dev/null 2>&1; then
+    error "An event_relay process is already running."
     error "Stop the existing acquisition before starting another instance."
     exit 1
 fi
@@ -194,12 +195,12 @@ log "Recovering previous remote event-camera processes"
 recover_zynq_grabber
 
 log "Removing stale event-camera port registrations"
-unregister_port "$LEFT_REMOTE_SOURCE"
-unregister_port "$RIGHT_REMOTE_SOURCE"
-unregister_port "$LEFT_LOCAL_INPUT"
-unregister_port "$RIGHT_LOCAL_INPUT"
-unregister_port "$LEFT_LOCAL_OUTPUT"
-unregister_port "$RIGHT_LOCAL_OUTPUT"
+unregister_port "$LEFT_ZYNQ_SOURCE"
+unregister_port "$RIGHT_ZYNQ_SOURCE"
+unregister_port "$LEFT_EVENT_SINK"
+unregister_port "$RIGHT_EVENT_SINK"
+unregister_port "$LEFT_EVENT_SOURCE"
+unregister_port "$RIGHT_EVENT_SOURCE"
 
 sleep 1
 
@@ -212,36 +213,36 @@ if ! yarp run --on "$REMOTE_RUN_SERVER" \
     exit 1
 fi
 
-wait_for_port "$LEFT_REMOTE_SOURCE" "$REMOTE_WAIT_SECONDS" \
+wait_for_port "$LEFT_ZYNQ_SOURCE" "$REMOTE_WAIT_SECONDS" \
     "left event-camera source"
 
-wait_for_port "$RIGHT_REMOTE_SOURCE" "$REMOTE_WAIT_SECONDS" \
+wait_for_port "$RIGHT_ZYNQ_SOURCE" "$REMOTE_WAIT_SECONDS" \
     "right event-camera source"
 
 log "Starting local event-camera reader"
-"$READER_EXECUTABLE" &
-READER_PID=$!
+"$RELAY_EXECUTABLE" &
+RELAY_PID=$!
 
-wait_for_port "$LEFT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
+wait_for_port "$LEFT_EVENT_SINK" "$RELAY_WAIT_SECONDS" \
     "left event-camera reader input"
 
-wait_for_port "$RIGHT_LOCAL_INPUT" "$READER_WAIT_SECONDS" \
+wait_for_port "$RIGHT_EVENT_SINK" "$RELAY_WAIT_SECONDS" \
     "right event-camera reader input"
 
-wait_for_port "$LEFT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
+wait_for_port "$LEFT_EVENT_SOURCE" "$RELAY_WAIT_SECONDS" \
     "left local event output"
 
-wait_for_port "$RIGHT_LOCAL_OUTPUT" "$READER_WAIT_SECONDS" \
+wait_for_port "$RIGHT_EVENT_SOURCE" "$RELAY_WAIT_SECONDS" \
     "right local event output"
 
 log "Connecting remote event streams"
-yarp connect "$LEFT_REMOTE_SOURCE" "$LEFT_LOCAL_INPUT" "$CARRIER"
-yarp connect "$RIGHT_REMOTE_SOURCE" "$RIGHT_LOCAL_INPUT" "$CARRIER"
+yarp connect "$LEFT_ZYNQ_SOURCE" "$LEFT_EVENT_SINK" "$CARRIER"
+yarp connect "$RIGHT_ZYNQ_SOURCE" "$RIGHT_EVENT_SINK" "$CARRIER"
 
 status "Event-camera pipeline is running. Press Ctrl+C to stop."
 
 log "Local outputs:"
-log "  $LEFT_LOCAL_OUTPUT"
-log "  $RIGHT_LOCAL_OUTPUT"
+log "  $LEFT_EVENT_SOURCE"
+log "  $RIGHT_EVENT_SOURCE"
 
-wait "$READER_PID"
+wait "$RELAY_PID"

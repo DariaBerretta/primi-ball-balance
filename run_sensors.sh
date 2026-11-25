@@ -20,7 +20,8 @@ printf '[INFO] Starting sensor acquisition...\n' >&3
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-scripts=(run_eventCam.sh run_rgbCam.sh run_touch.sh)
+# Only the three primary sensors start here. BMA400 and pose are opt-in.
+scripts=(run_event_cameras.sh run_rgb_cameras.sh run_touch.sh)
 pids=()
 
 command -v setsid >/dev/null || { echo "Missing command: setsid" >&2; exit 1; }

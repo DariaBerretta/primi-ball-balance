@@ -21,14 +21,12 @@ fi
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/rgbCam_reader}"
+READER_EXECUTABLE="${READER_EXECUTABLE:-$PROJECT_DIR/build/rgb_processor}"
 LOCAL_INPUT_PORT="${LOCAL_INPUT_PORT:-/primi-ball-balance/rgbCam/stereo:i}"
 CAMERA_OUTPUT_PORT="${CAMERA_OUTPUT_PORT:-/grabber}"
 CAMERA_RPC_PORT="${CAMERA_RPC_PORT:-${CAMERA_OUTPUT_PORT}/rpc}"
 CARRIER="${CARRIER:-fast_tcp}"
 
-LEFT_RAW_OUTPUT="${LEFT_RAW_OUTPUT:-/primi-ball-balance/rgbCam/left/raw:o}"
-RIGHT_RAW_OUTPUT="${RIGHT_RAW_OUTPUT:-/primi-ball-balance/rgbCam/right/raw:o}"
 LEFT_PROCESSED_OUTPUT="${LEFT_PROCESSED_OUTPUT:-/primi-ball-balance/rgbCam/left/processed:o}"
 RIGHT_PROCESSED_OUTPUT="${RIGHT_PROCESSED_OUTPUT:-/primi-ball-balance/rgbCam/right/processed:o}"
 LEFT_DETECTION_OUTPUT="${LEFT_DETECTION_OUTPUT:-/primi-ball-balance/rgbCam/left/detection:o}"
@@ -200,7 +198,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Preliminary checks must not affect existing acquisition processes.
+# Check the cluster and local reader before changing remote camera state.
 
 if ! yarp where >/dev/null 2>&1; then
     error "The YARP name server is not reachable."
@@ -219,8 +217,8 @@ if ! port_exists "$REMOTE_RUN_SERVER"; then
 fi
 
 # Do not terminate a reader belonging to another invocation.
-if pgrep -x rgbCam_reader >/dev/null 2>&1; then
-    error "An rgbCam_reader process is already running."
+if pgrep -x rgb_processor >/dev/null 2>&1; then
+    error "An rgb_processor process is already running."
     error "Stop the existing acquisition before starting another instance."
     exit 1
 fi
@@ -236,8 +234,6 @@ log "Removing stale RGB port registrations"
 unregister_port "$CAMERA_OUTPUT_PORT"
 unregister_port "$CAMERA_RPC_PORT"
 unregister_port "$LOCAL_INPUT_PORT"
-unregister_port "$LEFT_RAW_OUTPUT"
-unregister_port "$RIGHT_RAW_OUTPUT"
 unregister_port "$LEFT_PROCESSED_OUTPUT"
 unregister_port "$RIGHT_PROCESSED_OUTPUT"
 unregister_port "$LEFT_DETECTION_OUTPUT"
@@ -274,12 +270,6 @@ READER_PID=$!
 wait_for_port "$LOCAL_INPUT_PORT" "$READER_WAIT_SECONDS" \
     "local RGB reader input"
 
-wait_for_port "$LEFT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
-    "left raw RGB output"
-
-wait_for_port "$RIGHT_RAW_OUTPUT" "$READER_WAIT_SECONDS" \
-    "right raw RGB output"
-
 wait_for_port "$LEFT_PROCESSED_OUTPUT" "$READER_WAIT_SECONDS" \
     "left processed RGB output"
 
@@ -309,8 +299,6 @@ log "  contrast:   ${CAMERA_CONTRAST}"
 log "  RGB gains:  ${CAMERA_RED_GAIN}/${CAMERA_GREEN_GAIN}/${CAMERA_BLUE_GAIN}"
 
 log "Local outputs:"
-log "  $LEFT_RAW_OUTPUT"
-log "  $RIGHT_RAW_OUTPUT"
 log "  $LEFT_PROCESSED_OUTPUT"
 log "  $RIGHT_PROCESSED_OUTPUT"
 log "  $LEFT_DETECTION_OUTPUT"

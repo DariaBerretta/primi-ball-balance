@@ -8,7 +8,7 @@ fusion. Publishes both an EROS+skeleton RGB overlay and a numeric joint stream
 on YARP. **No robot motors are controlled.** This module is a sensor publisher;
 `Robot_control` remains independent.
 
-This integration **does not alter** `eventCam_reader.cpp`, `run_eventCam.sh`,
+The estimator uses `ev::window<ev::AE>` and native event filtering. It **does not alter** `event_relay.cpp` or `run_event_cameras.sh`,
 `run_monitor.sh`, or the existing robot controller. It consumes only the
 locally republished stream, respecting `docs/IO Architecture Guidelines.md`.
 
@@ -18,8 +18,8 @@ locally republished stream, respecting `docs/IO Architecture Guidelines.md`.
 - `./.venv/bin/python`, with YARP Python, PyTorch 1.12.1+cu113, NumPy,
   OpenCV, and the existing hpe-core MoveEnet Python imports working.
 - Checkpoint: `~/robot-code/hpe-core/example/movenet/models/upper.pth`.
-- Running YARP namespace/server and `./run_eventCam.sh` **in a separate terminal**.
-- One local source stream, e.g. `/primi-ball-balance/eventCam/left/raw:o`.
+- Running YARP namespace/server and `./run_event_cameras.sh` **in a separate terminal**.
+- One local source stream, e.g. `/primi-ball-balance/eventCameraStream/left/source:o`.
 
 ## Build
 
@@ -78,7 +78,7 @@ All port names begin with `/primi-ball-balance/moveEnetOFK/<camera>/`.
 
 | Port suffix | Direction | Type | Purpose |
 | --- | --- | --- | --- |
-| `events:i` | input | `ev::AE` packet | Raw event packets from **local** `eventCam_reader` |
+| `events:i` | input | `ev::AE` packet | Raw event packets from **local** `event_relay` |
 | `model/img:o` | output | `ImageMono` | EROS frames at requested `F_NET` |
 | `model/sklt:i` | input | `Bottle` | Timestamped MoveEnet results |
 | `eros:o` | output | `ImageMono` | EROS surface |
@@ -182,30 +182,27 @@ are `(vx,vy)` pairs in pixels/second, zeroed for invalid joints.
 
 The C++ module optionally filters the camera event stream **before** updating
 both EROS (MoveEnet input) and SAE (optical flow). The original
-`/primi-ball-balance/eventCam/<camera>/raw:o` stream remains unchanged.
+`/primi-ball-balance/eventCameraStream/<camera>/source:o` stream remains unchanged.
 
 Parameters in `config/moveEnetOFK.env`:
 
 | Setting | Initial value | Meaning |
 | --- | --- | --- |
 | `NOISE_FILTER` | `true` | Enable/disable filtering, including for A/B comparisons. |
-| `NOISE_REFRACTORY_MS` | `1.0` | Reject same-polarity events at the same pixel within this interval. Set `0` to disable this stage. |
-| `NOISE_SPATIAL_MS` | `5.0` | Require an event at a **different neighboring pixel** within the preceding interval. Set `0` to disable this stage. |
+| `NOISE_REFRACTORY_MS` | `0.0` | Reject same-polarity events at the same pixel within this interval. Set `0` to disable this stage. |
+| `NOISE_SPATIAL_MS` | `5` | Require an event at a neighboring pixel within the preceding 5 ms. Set `0` to disable this stage. |
 | `NOISE_RADIUS` | `1` | Neighbor radius in pixels; allowed range `1..3`. |
 
-The spatial stage excludes the center pixel to prevent an isolated hot pixel
-from supporting its own repeated events. Both stages update their temporal
-history even when events are rejected, allowing a neighboring event to
-subsequently provide spatial support. This is a **causal event filter**, not an
-image blur. It affects the inference input and optical-flow SAE, so joint
-tracking must be re-validated with and without filtering.
+The installed `ev::vNoiseFilter` checks recent activity within the configured
+spatial radius, **including the event's own pixel**. It maintains temporal
+state internally; rejected events may still affect later decisions. This
+filter changes the EROS and SAE inputs, so validate pose tracking with
+and without filtering rather than assuming the old custom filter's behavior.
 
-At startup the C++ module logs the chosen settings. Every five seconds
-`[stats]` reports `raw_events`, `events_used`, `noise_refractory`,
-`noise_spatial`, and `invalid`; they are cumulative counts. The intended
-accounting is `raw_events = events_used + noise_refractory + noise_spatial`.
-An event outside the configured sensor bounds increments `invalid` and is
-excluded from `raw_events`.
+At startup the C++ module logs the chosen settings. Every five seconds `[stats]` reports cumulative `raw_events`,
+`events_used`, and `events_dropped`, together with inference and flow
+counters. Invalid coordinates and noise rejection both contribute to
+`events_dropped`; they are not reported as separate categories.
 
 **Timing warning:** when the installed event-driven library was built without
 individual AE timestamps, the filter and SAE use packet-level timestamps.

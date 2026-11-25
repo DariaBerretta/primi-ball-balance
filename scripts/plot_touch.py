@@ -22,6 +22,7 @@ HAND_AREAS = {
 }
 
 
+# Read the numeric YARP dumper log without changing sample order.
 def load_log(path):
     # Accept YARP Bottle parentheses and trailing backslashes in pasted logs.
     delimiters = str.maketrans("()", "  ")
@@ -33,6 +34,8 @@ def load_log(path):
     return data
 
 
+# Display taxel groups and optional acceleration on a shared receiver-time
+# axis. No resampling or artificial time synchronization is introduced.
 def plot_session(session):
     touch_path = session / "touch" / "data.log"
     acceleration = None
@@ -120,4 +123,3 @@ if __name__ == "__main__":
     except (OSError, ValueError) as error:
         parser.exit(1, f"{error}\n")
     print(f"Saved plot to {output}")
-

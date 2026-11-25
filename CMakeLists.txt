@@ -1,84 +1,52 @@
 cmake_minimum_required(VERSION 3.19)
-
 project(primi-ball-balance LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(YARP REQUIRED COMPONENTS os sig dev math)
+# Dependencies shared by the sensor readers, estimators, and optional tools.
+find_package(YARP REQUIRED COMPONENTS os sig dev)
 find_package(event-driven REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
 find_package(Threads REQUIRED)
-find_package(ICUB REQUIRED)
+find_package(hpe-core REQUIRED)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
-#============ Shared Image Preprocessing ============
+# RGB preprocessing and colour-based ball detection.
 add_library(image_preprocessing src/ImagePreprocessor.cpp)
 target_include_directories(image_preprocessing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(image_preprocessing PUBLIC ${OpenCV_LIBS})
 
-#============ Ball Detection ============
 add_library(ball_detection src/BallDetector.cpp)
 target_include_directories(ball_detection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(ball_detection PUBLIC image_preprocessing ${OpenCV_LIBS})
 
-#============ Event Camera Reader ============
-add_executable(eventCam_reader src/eventCam_reader.cpp)
-target_link_libraries(eventCam_reader PRIVATE YARP::YARP_os YARP::YARP_init ev::event-driven Threads::Threads)
+# Camera readers. Event relaying avoids duplicate robot-to-laptop streams.
+add_executable(event_relay src/event_camera_relay.cpp)
+target_link_libraries(event_relay PRIVATE YARP::YARP_os YARP::YARP_init ev::event-driven Threads::Threads)
 
-#============ RGB Camera Reader ============
-add_executable(rgbCam_reader src/rgbCam_reader.cpp)
-target_link_libraries(rgbCam_reader PRIVATE ball_detection YARP::YARP_os YARP::YARP_sig YARP::YARP_init Threads::Threads)
+add_executable(rgb_processor src/rgb_camera_processor.cpp)
+target_link_libraries(rgb_processor PRIVATE ball_detection YARP::YARP_os YARP::YARP_sig YARP::YARP_init Threads::Threads)
 
-#============ Touch Reader ============
-add_executable(touch_reader src/Touch_reader.cpp)
-target_link_libraries(touch_reader PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
+add_executable(bma400_reader src/bma400_reader.cpp)
+target_link_libraries(bma400_reader PRIVATE YARP::YARP_os YARP::YARP_init)
 
-#============ Proprioception Reader ============
-add_executable(proprio_reader src/Proprio_reader.cpp)
-target_link_libraries(proprio_reader PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
-
-#============ Ball Balance Controller ============
+# Standalone right-arm trajectory playback (never auto-started).
 add_executable(Robot_control src/Robot_control.cpp)
 target_link_libraries(Robot_control PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init YARP::YARP_dev Threads::Threads)
 
-#============ Joint to XYZ Test ============
-add_executable(joint_to_xyz src/joint_to_xyz.cpp)
-target_link_directories(joint_to_xyz PRIVATE ${ICUB_LINK_DIRECTORIES})
-target_link_libraries(joint_to_xyz PRIVATE YARP::YARP_os YARP::YARP_sig YARP::YARP_init iKin ctrlLib Threads::Threads)
-
-#============ Online Event HPE (MoveEnetOFK) ============
-
-find_package(hpe-core REQUIRED)
-
-add_executable(moveEnetOFK_online
-    src/moveEnetOFK_online.cpp
-)
-
+# Optional event-based pose estimation and its Qt event-camera viewer.
+add_executable(moveEnetOFK_online src/moveEnetOFK_online.cpp)
 target_link_libraries(moveEnetOFK_online PRIVATE
-    YARP::YARP_os
-    YARP::YARP_sig
-    YARP::YARP_init
-    ev::event-driven
-    hpe-core::hpe-core
-    ${OpenCV_LIBS}
-    Threads::Threads
-)
-# Add to the existing CMakeLists.txt, after the existing event-driven target.
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+    YARP::YARP_os YARP::YARP_sig YARP::YARP_init
+    ev::event-driven hpe-core::hpe-core ${OpenCV_LIBS} Threads::Threads)
+
 add_executable(event_control_gui src/event_control_gui.cpp)
 target_link_libraries(event_control_gui PRIVATE
-    Qt${QT_VERSION_MAJOR}::Widgets
-    YARP::YARP_os YARP::YARP_init
+    Qt${QT_VERSION_MAJOR}::Widgets YARP::YARP_os YARP::YARP_init
     ev::event-driven ${OpenCV_LIBS} Threads::Threads)
 
-
+# Standalone camera controller source (also built on icub-ultrascale).
 add_subdirectory(tools/camera_control)
-
-#============ BMA400 USB/YARP Reader ============
-add_executable(bma400_reader src/bma400_reader.cpp)
-target_link_libraries(bma400_reader PRIVATE 
-    YARP::YARP_os 
-    YARP::YARP_init
-    )

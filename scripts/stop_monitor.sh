@@ -10,7 +10,7 @@ yarp disconnect "${RGB_LEFT_PROCESSED_SOURCE:-/unused}" \
     /primi-ball-balance/monitor/rgb/left/processed:i >/dev/null 2>&1 || true
 yarp disconnect "${RGB_RIGHT_PROCESSED_SOURCE:-/unused}" \
     /primi-ball-balance/monitor/rgb/right/processed:i >/dev/null 2>&1 || true
-yarp disconnect /primi-ball-balance/skin/right_hand/compensated:o \
+yarp disconnect "${SKIN_SOURCE:-/icub/skin/right_hand_comp}" \
     /skinGui/right_hand:i >/dev/null 2>&1 || true
 
 if [[ -d "$PID_DIR" ]]; then

@@ -30,15 +30,14 @@ struct StereoFrame
 struct EyePorts
 {
     std::string eye;
-    std::string rawName;
     std::string processedName;
     std::string detectionName;
 
-    yarp::os::BufferedPort<RgbImage> raw;
     yarp::os::BufferedPort<RgbImage> processed;
     yarp::os::BufferedPort<yarp::sig::Vector> detection;
 };
 
+// The camera delivers both eyes horizontally packed into one RGB image.
 StereoFrame splitStereoFrame(const cv::Mat &combined)
 {
     if(combined.empty())
@@ -60,25 +59,18 @@ void configureEyePorts(EyePorts &ports, const std::string &eye)
     const std::string baseName = "/primi-ball-balance/rgbCam/" + eye;
 
     ports.eye = eye;
-    ports.rawName = baseName + "/raw:o";
     ports.processedName = baseName + "/processed:o";
     ports.detectionName = baseName + "/detection:o";
 }
 
 void closeEyePorts(EyePorts &ports)
 {
-    ports.raw.close();
     ports.processed.close();
     ports.detection.close();
 }
 
 bool openEyePorts(EyePorts &ports)
 {
-    if(!ports.raw.open(ports.rawName)) {
-        std::cerr << "Could not open " << ports.rawName << '\n';
-        return false;
-    }
-
     if(!ports.processed.open(ports.processedName)) {
         std::cerr << "Could not open " << ports.processedName << '\n';
         closeEyePorts(ports);
@@ -94,26 +86,7 @@ bool openEyePorts(EyePorts &ports)
     return true;
 }
 
-void publishRaw(EyePorts &ports, const cv::Mat &rgbImage, bool hasStamp,
-                yarp::os::Stamp &stamp)
-{
-    if(ports.raw.getOutputCount() == 0)
-        return;
-
-    RgbImage &output = ports.raw.prepare();
-    output.resize(rgbImage.cols, rgbImage.rows);
-
-    cv::Mat outputView(output.height(), output.width(), CV_8UC3,
-                       output.getRawImage(), output.getRowSize());
-
-    rgbImage.copyTo(outputView);
-
-    if(hasStamp)
-        ports.raw.setEnvelope(stamp);
-
-    ports.raw.write();
-}
-
+// Overlay the ball result for monitoring; this does not change detection data.
 void publishProcessed(EyePorts &ports, const PreprocessedFrame &frame,
                       const BallDetectionOutput &detection, bool hasStamp,
                       yarp::os::Stamp &stamp)
@@ -156,6 +129,7 @@ void publishProcessed(EyePorts &ports, const PreprocessedFrame &frame,
     ports.processed.write();
 }
 
+// Six fields: [valid, x, y, radius, confidence, source_timestamp].
 void publishDetection(EyePorts &ports, const BallDetectionOutput &detection,
                       double timestamp, bool hasStamp, yarp::os::Stamp &stamp)
 {
@@ -181,10 +155,9 @@ BallDetectionOutput processEye(EyePorts &ports, const cv::Mat &rgbImage,
                                const ImagePreprocessor &preprocessor,
                                const BallDetector &detector)
 {
-    const PreprocessedFrame frame = preprocessor.process(rgbImage, timestamp);
+    const PreprocessedFrame frame = preprocessor.process(rgbImage);
     const BallDetectionOutput detection = detector.detect(frame);
 
-    publishRaw(ports, rgbImage, hasStamp, stamp);
     publishProcessed(ports, frame, detection, hasStamp, stamp);
     publishDetection(ports, detection, timestamp, hasStamp, stamp);
 
@@ -267,8 +240,6 @@ int main()
                   << "Expected layout:\n"
                   << "  [left eye][right eye]\n\n"
                   << "Outputs:\n"
-                  << "  " << leftPorts.rawName << '\n'
-                  << "  " << rightPorts.rawName << '\n'
                   << "  " << leftPorts.processedName << '\n'
                   << "  " << rightPorts.processedName << '\n'
                   << "  " << leftPorts.detectionName << '\n'

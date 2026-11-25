@@ -16,6 +16,8 @@ done
 
 yarp where >/dev/null || { echo "YARP name server unavailable"; exit 1; }
 
+# Tile the live viewers inside the current desktop work area. Saved
+# port configuration is independent of screen geometry.
 # Desktop work area excludes the dock and top panel.
 read -r work_x work_y work_w work_h < <(
     wmctrl -d | awk '$2 == "*" {
@@ -155,7 +157,7 @@ ty="$MONITOR_Y"
 by=$((ty + qh + WINDOW_GAP))
 
 # Right-hand compensated touch visualisation
-skin_source="/primi-ball-balance/skin/right_hand/compensated:o"
+skin_source="${SKIN_SOURCE:-/icub/skin/right_hand_comp}"
 skin_input="/skinGui/right_hand:i"
 skin_title="SkinGui (part: right_hand)"
 
@@ -224,7 +226,7 @@ wait_for_port "$skin_input" 15
 
 yarp connect "$RGB_LEFT_PROCESSED_SOURCE" "$left_view" shmem
 yarp connect "$RGB_RIGHT_PROCESSED_SOURCE" "$right_view" shmem
-yarp connect "$skin_source" "$skin_input" shmem
+yarp connect "$skin_source" "$skin_input" tcp
 
 # Wait for visualization windows
 for title in "$scope_title" "$EVENT_LEFT_SOURCE" "$EVENT_RIGHT_SOURCE" \

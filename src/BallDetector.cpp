@@ -61,6 +61,7 @@ void BallDetector::validateConfig() const
         throw std::invalid_argument("Morphology iterations cannot be negative");
 }
 
+// Combine the configured HSV ranges and remove isolated mask noise.
 cv::Mat BallDetector::createMask(const cv::Mat &hsvImage) const
 {
     cv::Mat combinedMask = cv::Mat::zeros(
@@ -93,8 +94,10 @@ cv::Mat BallDetector::createMask(const cv::Mat &hsvImage) const
     return combinedMask;
 }
 
+// Choose the largest sufficiently circular contour and report its centre,
+// enclosing radius, and a shape-based confidence score.
 BallDetectionOutput BallDetector::detect(
-    const PreprocessedFrame &frame, cv::Mat *maskOutput) const
+    const PreprocessedFrame &frame) const
 {
     BallDetectionOutput result;
 
@@ -102,9 +105,6 @@ BallDetectionOutput BallDetector::detect(
         return result;
 
     cv::Mat mask = createMask(frame.hsv);
-
-    if(maskOutput != nullptr)
-        mask.copyTo(*maskOutput);
 
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(

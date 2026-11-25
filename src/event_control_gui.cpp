@@ -6,6 +6,7 @@
 #include <yarp/os/RpcClient.h>
 #include <yarp/os/Bottle.h>
 
+// Qt renders stereo raw/processed views and explicit camera settings.
 #include <QApplication>
 #include <QCheckBox>
 #include <QCoreApplication>
@@ -53,8 +54,8 @@
 namespace {
 constexpr int width = 640, height = 480;
 const char* sources[2] = {
-    "/primi-ball-balance/eventCam/left/raw:o",
-    "/primi-ball-balance/eventCam/right/raw:o"
+    "/primi-ball-balance/eventCameraStream/left/source:o",
+    "/primi-ball-balance/eventCameraStream/right/source:o"
 };
 const char* inputs[2] = {
     "/primi-ball-balance/eventControl/left/events:i",
@@ -71,9 +72,10 @@ struct DisplayPacket {
     std::vector<DisplayEvent> events;
 };
 
-// Classs window - no redundant copied of data
+// One worker per camera maintains event surfaces and a bounded raw display history.
+// The GUI thread only takes snapshots; it does not read YARP packets.
 struct Camera {
-    ev::BufferedPort<ev::AE> input; //drop it
+    ev::BufferedPort<ev::AE> input;
     std::thread worker;
     std::atomic<bool> running{false};
     std::atomic<int> kernel{7}, decayMilli{300}, mode{0}, windowMs{30};
@@ -146,23 +148,21 @@ struct Camera {
                         reset();
                     }
                     std::size_t i = 0;
-                    std::cout << noise << " " << packetTime - floor(packetTime) << std::endl;
                     for (const auto& e : *packet) {
                         const int x = e.x, y = e.y;
                         double t = packetTime;
                         ++seen;
                         if (x < 0 || x >= width || y < 0 || y >= height) continue;
-                        if (noise && !filter.check(x, y, e.p, t)) continue;
-                        if (i++ % stride == 0)
-                            display.events.push_back({static_cast<uint16_t>(x),
-                                static_cast<uint16_t>(y), bool(e.p)});
-                        
-                        
                         if (ev::ts_status) {
                             const double age = ev::deltaS(lastTick, static_cast<int>(e.ts));
                             if (age >= 0 && age < 2.0) t -= age;
                         }
-                        
+                        // Raw display is unaffected by processed-event filtering.
+                        if (i++ % stride == 0)
+                            display.events.push_back({static_cast<uint16_t>(x),
+                                static_cast<uint16_t>(y), bool(e.p)});
+                        // The optional filter applies only to EROS, SAE, and TOS.
+                        if (noise && !filter.check(x, y, e.p, t)) continue;
                         ++kept;
                         lastEventTime = std::max(lastEventTime, t);
                         if (m == 0) eros.update(x, y);
@@ -226,7 +226,6 @@ struct Camera {
                         pixel = cv::Vec3b(255, 255, 255);
                 }
             if (currentMode == 0) {
-                // eros.getSurface().convertTo(processed, CV_8U, 255.0);
                 eros.getSurface().convertTo(processed, CV_8U);
             } else if (currentMode == 1) {
                 // SAE is a timestamp surface; only its DISPLAY mapping uses
@@ -255,6 +254,7 @@ struct Camera {
     }
 };
 
+// Simple Qt controls shared by both camera panels.
 QWidget* panel(const QString& title, QLabel*& view) {
     auto* widget = new QWidget;
     auto* layout = new QVBoxLayout(widget);
@@ -288,6 +288,8 @@ QWidget* slider(int lo, int hi, int initial, QSlider*& control) {
     return widget;
 }
 
+// Four live displays, local processing settings, saved profiles, and explicit
+// hardware-bias writes through a separate RPC service.
 class Window : public QMainWindow {
     Camera cameras[2];
     QLabel *rawViews[2]{}, *processedViews[2]{};
@@ -341,7 +343,7 @@ public:
         root->addLayout(profilesRow);
 
         auto* settings = new QHBoxLayout;
-        auto* hardwareBox = new QGroupBox("Camera hardware (zynqGrabber RPC)");
+        auto* hardwareBox = new QGroupBox("Camera hardware (camera_control RPC)");
         auto* hardware = new QFormLayout(hardwareBox);
         linkHardware = new QCheckBox("Link cameras");
         linkHardware->setChecked(true);
@@ -538,6 +540,7 @@ public:
         });
         timer->start(33);
     }
+    // Profile settings only. Loading a profile never writes camera hardware.
     QJsonObject captureSettings() const {
         QJsonObject hardware, processing, raw;
         for (int s = 0; s < 2; ++s) {
@@ -613,8 +616,7 @@ public:
     bool writeProfiles() {
         QSaveFile file(profilePath);
         if (!file.open(QIODevice::WriteOnly)) return false;
-        const QJsonObject root{{"factory_defaults", defaults},
-                               {"last_profile", lastProfile}, {"profiles", profiles}};
+        const QJsonObject root{{"last_profile", lastProfile}, {"profiles", profiles}};
         if (file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0)
             return false;
         return file.commit();

@@ -15,6 +15,7 @@ if (( $# > 1 )) || [[ "${1:-}" == -* ]]; then
     exit 2
 fi
 
+# Select producer ports; keep the two recording streams independent.
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 touch_launcher="${1:-$PROJECT_DIR/run_touch.sh}"
 touch_source="${RIGHT_COMPENSATED_SOURCE:-/icub/skin/right_hand_comp}"
@@ -101,6 +102,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Start only missing producers. Existing acquisition processes are not owned
+# by this recording session and must not be stopped by its cleanup trap.
 if ! port_exists "$touch_source"; then
     bash "$touch_launcher" &
     launcher_pids+=("$!")
@@ -123,6 +126,8 @@ session="$(mktemp -d "$output_root/touch_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
 cd "$session"
 echo "Session directory: $session"
 
+# Create one YARP dumper per stream. Receiver times share the host clock;
+# they do not guarantee hardware-synchronous sampling.
 for i in "${!sources[@]}"; do
     port="/primi-ball-balance/record/${HOSTNAME:-localhost}/${session##*/}/${stream_names[i]}"
     dumper_ports+=("$port")

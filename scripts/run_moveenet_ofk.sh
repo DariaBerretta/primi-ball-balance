@@ -27,7 +27,7 @@ source "$CONFIG"
 PYTHON="$ROOT/.venv/bin/python"
 CPP="$ROOT/build/moveEnetOFK_online"
 SIDE_CAR="$ROOT/python/moveenet_upper_online.py"
-SOURCE="/primi-ball-balance/eventCam/$CAMERA/raw:o"
+SOURCE="/primi-ball-balance/eventCameraStream/$CAMERA/source:o"
 BASE="/primi-ball-balance/moveEnetOFK/$CAMERA"
 
 for file in "$PYTHON" "$CPP" "$SIDE_CAR" "$CHECKPOINT"; do
@@ -44,7 +44,7 @@ done
 yarp where >/dev/null || { echo '[ERROR] YARP name server unavailable' >&2; exit 1; }
 yarp exists "$SOURCE" >/dev/null || {
   echo "[ERROR] Event source $SOURCE unavailable." >&2
-  echo '[ERROR] Start the existing run_eventCam.sh in another terminal first.' >&2
+  echo '[ERROR] Start the existing run_event_cameras.sh in another terminal first.' >&2
   exit 1
 }
 

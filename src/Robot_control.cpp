@@ -56,7 +56,6 @@ struct Options
 {
     // Robot name.
     // If YARP_ROBOT_NAME exists it will be used automatically.
-    std::string YARP_ROBOT_NAME = "icub";
     std::string robot;
 
     // Lookup table generated from the recorded joint angles.
@@ -88,10 +87,8 @@ struct Options
     /*
      * The lookup table contains 16 right_arm joints.
      *
-     * We control only the first 7 by default:
-     * shoulder/elbow/wrist.
-     *
-     * The remaining joints belong to the hand.
+     * The existing default replays all 16 right-arm joints, including
+     * the fingers. Use --joints 7 for shoulder/elbow/wrist only.
      */
     int controlledJoints = 16;
 
@@ -139,7 +136,7 @@ void printUsage(const char* program)
 
         << "  --joints <7|16>\n"
         << "      Number of right-arm joints to replay.\n"
-        << "      Default: 7\n\n"
+        << "      Default: 16\n\n"
 
         << "  --init-speed <deg/s>\n"
         << "      Speed used to reach INIT.\n"
@@ -313,7 +310,7 @@ bool parseArguments(
 
 
 // ============================================================
-// Load lookupTable.txt
+// Load the joint playback table (sample ID, source timestamp, 16 angles).
 // ============================================================
 
 bool loadLookupTable(

@@ -37,8 +37,10 @@ void ImagePreprocessor::validateImage(const cv::Mat &image) const
         throw std::invalid_argument("Input image must contain three colour channels");
 }
 
+// Convert YARP RGB input into the OpenCV BGR/HSV views needed for
+// drawing the detection and finding the ball.
 PreprocessedFrame ImagePreprocessor::process(
-    const cv::Mat &image, double timestamp) const
+    const cv::Mat &image) const
 {
     validateImage(image);
 
@@ -50,7 +52,6 @@ PreprocessedFrame ImagePreprocessor::process(
         image.copyTo(normalisedBgr);
 
     PreprocessedFrame frame;
-    frame.timestamp = timestamp;
 
     if(config.gaussianKernelSize > 1) {
         cv::Size kernel(config.gaussianKernelSize, config.gaussianKernelSize);
@@ -60,7 +61,6 @@ PreprocessedFrame ImagePreprocessor::process(
     }
 
     cv::cvtColor(frame.bgr, frame.hsv, cv::COLOR_BGR2HSV);
-    cv::cvtColor(frame.bgr, frame.gray, cv::COLOR_BGR2GRAY);
 
     return frame;
 }
