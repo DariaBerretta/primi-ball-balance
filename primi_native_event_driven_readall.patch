@@ -1,0 +1,500 @@
+diff --git a/src/moveEnetOFK_online.cpp b/src/moveEnetOFK_online.cpp
+--- a/src/moveEnetOFK_online.cpp
++++ b/src/moveEnetOFK_online.cpp
+@@ -2,6 +2,7 @@
+ // Consumes the locally republished event stream; never opens robot hardware ports.
+ #include <event-driven/core.h>
+ #include <event-driven/algs.h>
++#include <event-driven/vis/filters.h>
+ #include <hpe-core/utility.h>
+ #include <hpe-core/representations.h>
+ #include <hpe-core/motion.h>
+@@ -121,72 +122,6 @@
+            x >= 0 && y >= 0 && x < cfg.width && y < cfg.height;
+ }
+ 
+-// Causal background-activity filter. A spatially supported event must have
+-// at least one DIFFERENT pixel active recently (the current pixel alone is
+-// not evidence of motion). We record all raw observations, including rejected
+-// ones, so neighboring activity can still provide support. Only one thread
+-// accesses this object (acquisitionLoop): no additional locking required.
+-// Time units are seconds, on the same relative axis as the SAE.
+-class EventNoiseFilter {
+-    public:
+-    enum class Decision { Keep, Refractory, NoSpatialSupport };
+-
+-    explicit EventNoiseFilter(const Config &cfg)
+-        : width_(cfg.width), height_(cfg.height),
+-          enabled_(cfg.noiseFilter),
+-          refractory_(cfg.noiseRefractoryMs * 0.001),
+-          spatialWindow_(cfg.noiseSpatialMs * 0.001),
+-          radius_(cfg.noiseRadius),
+-          lastSeen_(static_cast<std::size_t>(cfg.width) * cfg.height, -1.0),
+-          lastPolarity_(static_cast<std::size_t>(cfg.width) * cfg.height, 2) {}
+-
+-    Decision check(int x, int y, int polarity, double t) {
+-        if (!enabled_) return Decision::Keep;
+-        const std::size_t idx = static_cast<std::size_t>(y) * width_ + x;
+-        const double previous = lastSeen_[idx];
+-        const bool refractory = refractory_ > 0 && previous >= 0 &&
+-            lastPolarity_[idx] == static_cast<std::uint8_t>(polarity) &&
+-            t >= previous && t - previous < refractory_;
+-
+-        bool spatiallySupported = spatialWindow_ <= 0;
+-        if (!refractory && !spatiallySupported) {
+-        const int x0 = std::max(0, x - radius_);
+-        const int x1 = std::min(width_ - 1, x + radius_);
+-        const int y0 = std::max(0, y - radius_);
+-        const int y1 = std::min(height_ - 1, y + radius_);
+-            for (int ny = y0; ny <= y1 && !spatiallySupported; ++ny) {
+-                for (int nx = x0; nx <= x1; ++nx) {
+-                    if (nx == x && ny == y) continue;
+-                    const double nt = lastSeen_[static_cast<std::size_t>(ny) * width_ + nx];
+-                    if (nt >= 0 && t >= nt && t - nt <= spatialWindow_) {
+-                        spatiallySupported = true;
+-                        break;
+-                    }
+-                }
+-            }
+-        }
+-
+-        // Update even for rejected events to preserve neighboring evidence.
+-        // For out-of-order individual timestamps, never move the recorded
+-        // timestamp backwards (the source packet clock is checked separately).
+-        if (t >= previous) {
+-            lastSeen_[idx] = t;
+-            lastPolarity_[idx] = static_cast<std::uint8_t>(polarity);
+-        }
+-        if (refractory) return Decision::Refractory;
+-        if (!spatiallySupported) return Decision::NoSpatialSupport;
+-        return Decision::Keep;
+-    }
+-
+-    private:
+-    int width_, height_;
+-    bool enabled_;
+-    double refractory_, spatialWindow_;
+-    int radius_;
+-    std::vector<double> lastSeen_;
+-    std::vector<std::uint8_t> lastPolarity_;
+-};
+-
+ struct Request {
+     int sequence{0};
+     double frameTimestamp{0};    // Relative tracking time (precision-safe).
+@@ -196,9 +131,19 @@
+ };
+ 
+ struct Shared {
+-        explicit Shared(const Config &c) : cfg(c), noiseFilter(c) {
++        explicit Shared(const Config &c) : cfg(c) {
+         eros.init(cfg.width, cfg.height, 7, 0.3);
+         sae.init(cfg.width, cfg.height);
++        // Reuse the event-driven filter rather than maintaining custom SAE/POL
++        // bookkeeping. All filter state is owned by the acquisition thread.
++        noiseFilter.initialise(cfg.width, cfg.height);
++        if (cfg.noiseFilter) {
++            if (cfg.noiseRefractoryMs > 0.0)
++                noiseFilter.use_temporal_filter(cfg.noiseRefractoryMs * 0.001);
++            if (cfg.noiseSpatialMs > 0.0)
++                noiseFilter.use_spatial_filter(cfg.noiseSpatialMs * 0.001,
++                                               cfg.noiseRadius);
++        }
+         // Value-initialization is essential: the upstream LC implementation
+         // contains fixed-size velocity/history arrays without member initializers.
+         if (!tracker.initialise({cfg.procU, cfg.measUD, cfg.measUV,
+@@ -210,14 +155,13 @@
+         flowEstimator.prev_update_ts = 0;
+     }
+     Config cfg;
+-    EventNoiseFilter noiseFilter;
++    ev::vNoiseFilter noiseFilter;
+     std::atomic<bool> running{true};
+     std::mutex surfacesMutex;
+     ev::EROS eros;
+     hpecore::SAE sae;
+     double eventTimestamp{0.0};        // Relative time used by SAE and LC.
+     double eventSourceTimestamp{0.0};  // Original source time for YARP envelopes.
+-    double sourceEpoch{0.0};
+     bool haveEvents{false};
+ 
+     std::mutex trackerMutex;
+@@ -239,7 +183,7 @@
+     int nextRequestSequence{0};
+ 
+     std::atomic<std::uint64_t> packets{0}, events{0}, rawEvents{0},
+-        invalidEvents{0}, refractoryDrops{0}, spatialDrops{0},
++        invalidEvents{0}, noiseRejected{0},
+         requests{0}, modelRepliesReceived{0}, detections{0}, flowSteps{0};
+ };
+ 
+@@ -264,81 +208,128 @@
+     return true;
+ }
+ 
+-void acquisitionLoop(Shared &s, ev::BufferedPort<ev::AE> &input) {
++// event-driven's window owns the YARP receive thread and reuses packet memory.
++// readAll() consumes all currently available packets, as in EDPR-APRIL.
++// Unlike EDPR-APRIL, we retain each packet's original source timestamp from
++// window::iterator::timestamp(), rather than assigning the window's last
++// timestamp to every event. This matters when per-event AE timestamps are off.
++void acquisitionLoop(Shared &s, ev::window<ev::AE> &input) {
++    struct AcceptedEvent {
++        int x;
++        int y;
++        double timestamp;
++    };
++
+     bool warnedNoStamp = false;
+     double previousTimestamp = 0.0;
+-    while (s.running.load() && !stopRequested.load()) {
+-        ev::packet<ev::AE> *packet = input.read(true);
+-        if (!packet) break;
+-        if (packet->size() == 0) continue;
+-
+-        double t = packet->timestamp();
+-        if (!std::isfinite(t) || t <= 0) {
+-            t = yarp::os::Time::now();
+-            if (!warnedNoStamp) {
+-                std::cerr << "[WARN] Source packet has no usable YARP envelope; "
+-                             "using local receipt time. Check synchronization.\n";
+-                warnedNoStamp = true;
+-            }
+-        }
+-        if (previousTimestamp > 0 && t + 0.001 < previousTimestamp) {
+-            std::cerr << "[ERROR] Event timestamps moved backwards; stop/restart "
+-                         "to avoid incorrect latency compensation.\n";
+-            s.running.store(false);
+-            stopRequested.store(true);
++    double epoch = 0.0;
++    bool haveEpoch = false;
++    std::vector<AcceptedEvent> accepted;
++
++    while (s.running.load() && !stopRequested.load() && input.isRunning()) {
++        // readAll() returns the entire newly received window. Its info timestamp
++        // is only the LAST packet's time; use iterator timestamps below.
++        const ev::info windowInfo = input.readAll(true);
++        if (stopRequested.load() || !s.running.load() || !input.isRunning())
+             break;
+-        }
+-        previousTimestamp = t;
+-
+-        const unsigned int lastTick = (*packet)[packet->size() - 1].ts;
+-        std::uint64_t validInPacket = 0;
+-        std::uint64_t rawInPacket = 0;
+-        std::uint64_t invalidInPacket = 0;
+-        std::uint64_t refractoryInPacket = 0;
+-        std::uint64_t spatialInPacket = 0;
+-        std::lock_guard<std::mutex> lk(s.surfacesMutex);
+-        // Use a relative clock in SAE: absolute Unix timestamps lose precision
+-        // for the microsecond differences required by triplet optical flow.
+-        if (!s.haveEvents) s.sourceEpoch = t;
+-        const double relativeTime = 1.0 + (t - s.sourceEpoch);
+-        for (auto &v : *packet) {
+-        const int x = static_cast<int>(v.x);
+-        const int y = static_cast<int>(v.y);
+-            if (x < 0 || y < 0 || x >= s.cfg.width || y >= s.cfg.height) {
+-                ++invalidInPacket;
+-                continue;
+-            }
+-            double eventTime = relativeTime;
+-            // If event-driven was built with individual timestamps, use them.
+-            // Otherwise packet-time SAE is a fallback with reduced flow accuracy.
+-            if (ev::ts_status) {
+-            const double offset = ev::deltaS(
+-                    static_cast<int>(lastTick), static_cast<int>(v.ts));
+-                if (offset >= 0 && offset < 2.0) eventTime = relativeTime - offset;
+-            }
+-            ++rawInPacket;
+-            const auto decision = s.noiseFilter.check(x, y, v.p, eventTime);
+-            if (decision == EventNoiseFilter::Decision::Refractory) {
+-                ++refractoryInPacket;
+-                continue;
+-            }
+-            if (decision == EventNoiseFilter::Decision::NoSpatialSupport) {
+-                ++spatialInPacket;
+-                continue;
+-            }
+-            s.eros.update(x, y);
+-            s.sae.update(x, y, eventTime);
+-            ++validInPacket;
+-        }
+-        s.events.fetch_add(validInPacket);
+-        s.rawEvents.fetch_add(rawInPacket);
+-        s.invalidEvents.fetch_add(invalidInPacket);
+-        s.refractoryDrops.fetch_add(refractoryInPacket);
+-        s.spatialDrops.fetch_add(spatialInPacket);
+-        s.eventTimestamp = relativeTime;
+-        s.eventSourceTimestamp = t;
+-        s.haveEvents = true;
+-        ++s.packets;
++        if (windowInfo.count == 0)
++            continue;
++
++        auto cursor = input.begin();
++        const auto windowEnd = input.end();
++        while (cursor != windowEnd && s.running.load() &&
++               !stopRequested.load()) {
++            // Group consecutive events by the packet Stamp exposed by the
++            // native window iterator. This preserves packet-level timing even
++            // when readAll() collects more than one packet.
++            const auto packetBegin = cursor;
++            const double packetStamp = cursor.timestamp();
++            const double packetId = cursor.packetID();
++            unsigned int lastTick = 0;
++            do {
++                if (ev::ts_status) lastTick = cursor->ts;
++                ++cursor;
++            } while (cursor != windowEnd &&
++                     cursor.timestamp() == packetStamp &&
++                     cursor.packetID() == packetId);
++            const auto packetEnd = cursor;
++
++            double t = packetStamp;
++            if (!std::isfinite(t) || t <= 0) {
++                t = yarp::os::Time::now();
++                if (!warnedNoStamp) {
++                    std::cerr << "[WARN] Source events have no usable YARP stamp; "
++                                 "using local receipt time. Check synchronization.\n";
++                    warnedNoStamp = true;
++                }
++            }
++            if (previousTimestamp > 0 && t + 0.001 < previousTimestamp) {
++                std::cerr << "[ERROR] Event timestamps moved backwards; stop/restart "
++                             "to avoid incorrect latency compensation.\n";
++                s.running.store(false);
++                stopRequested.store(true);
++                break;
++            }
++            previousTimestamp = t;
++            if (!haveEpoch) {
++                epoch = t;
++                haveEpoch = true;
++            }
++            // Keep the SAE clock small enough for sub-millisecond precision.
++            const double relativeTime = 1.0 + (t - epoch);
++
++            std::uint64_t validInPacket = 0;
++            std::uint64_t rawInPacket = 0;
++            std::uint64_t invalidInPacket = 0;
++            std::uint64_t rejectedInPacket = 0;
++            accepted.clear();
++
++            // Filter outside surfacesMutex. Only one thread owns vNoiseFilter.
++            for (auto eventIt = packetBegin; eventIt != packetEnd; ++eventIt) {
++                const auto &v = *eventIt;
++                const int x = static_cast<int>(v.x);
++                const int y = static_cast<int>(v.y);
++                if (x < 0 || y < 0 || x >= s.cfg.width || y >= s.cfg.height) {
++                    ++invalidInPacket;
++                    continue;
++                }
++
++                double eventTime = relativeTime;
++                if (ev::ts_status) {
++                    const double age = ev::deltaS(static_cast<int>(lastTick),
++                                                  static_cast<int>(v.ts));
++                    if (age >= 0 && age < 2.0) eventTime -= age;
++                }
++                ++rawInPacket;
++                if (s.cfg.noiseFilter &&
++                    !s.noiseFilter.check(x, y, v.p, eventTime)) {
++                    ++rejectedInPacket;
++                    continue;
++                }
++                accepted.push_back({x, y, eventTime});
++                ++validInPacket;
++            }
++
++            // Lock per source packet, NOT for the entire readAll() window.
++            // This keeps EROS/SAE snapshots consistent while giving the
++            // inference and flow threads opportunities to acquire the mutex.
++            {
++                std::lock_guard<std::mutex> lock(s.surfacesMutex);
++                for (const auto &v : accepted) {
++                    s.eros.update(v.x, v.y);
++                    s.sae.update(v.x, v.y, v.timestamp);
++                }
++                s.eventTimestamp = relativeTime;
++                s.eventSourceTimestamp = t;
++                s.haveEvents = true;
++            }
++
++            s.events.fetch_add(validInPacket);
++            s.rawEvents.fetch_add(rawInPacket);
++            s.invalidEvents.fetch_add(invalidInPacket);
++            s.noiseRejected.fetch_add(rejectedInPacket);
++            ++s.packets;
++        }
+     }
+     s.running.store(false);
+ }
+@@ -805,7 +796,7 @@
+     }
+     Shared state(cfg);
+     const std::string base = "/primi-ball-balance/moveEnetOFK/" + cfg.camera;
+-    ev::BufferedPort<ev::AE> events;
++    ev::window<ev::AE> events;
+     yarp::os::BufferedPort<Mono> modelImages, erosOutput;
+     yarp::os::BufferedPort<Rgb> overlayOutput;
+     yarp::os::BufferedPort<yarp::os::Bottle> modelReplies, skeletonOutput,
+@@ -820,7 +811,7 @@
+         !movenetSkeletonOutput.open(base + "/movenet/skeleton:o") ||
+         !ofkSkeletonOutput.open(base + "/ofk/skeleton:o")) {
+         std::cerr << "Unable to open all YARP ports (name conflict?).\n";
+-        events.close(); modelImages.close(); modelReplies.close();
++        events.stop(); modelImages.close(); modelReplies.close();
+         erosOutput.close(); overlayOutput.close(); skeletonOutput.close();
+         velocityOutput.close(); movenetSkeletonOutput.close();
+         ofkSkeletonOutput.close();
+@@ -836,8 +827,14 @@
+               << "; spatial=" << cfg.noiseSpatialMs << " ms"
+               << "; radius=" << cfg.noiseRadius << " px\n";
+     if (cfg.noiseFilter && !ev::ts_status) {
+-        std::cerr << "[WARN] Noise filter uses packet-level timestamps; "
+-                     "spatial/refractory windows are approximate.\n";
++        std::cerr << "[WARN] ev::vNoiseFilter uses packet-level timestamps; "
++                     "spatial/temporal windows are approximate.\n";
++    }
++    if (cfg.noiseFilter && cfg.noiseSpatialMs > 0 &&
++        cfg.noiseRefractoryMs == 0) {
++        std::cerr << "[INFO] Upstream vNoiseFilter includes the current pixel "
++                     "in spatial support; enable temporal filtering if hot "
++                     "pixels continue to pass.\n";
+     }
+     std::cout << "PRIMI MoveEnetOFK online: " << cfg.camera
+               << " camera, " << cfg.width << 'x' << cfg.height
+@@ -866,8 +863,7 @@
+         std::cout << "[stats] packets=" << state.packets.load()
+                   << " raw_events=" << state.rawEvents.load()
+                   << " events_used=" << state.events.load()
+-                  << " noise_refractory=" << state.refractoryDrops.load()
+-                  << " noise_spatial=" << state.spatialDrops.load()
++                  << " noise_rejected=" << state.noiseRejected.load()
+                   << " invalid=" << state.invalidEvents.load()
+                   << " net_requests=" << state.requests.load()
+                   << " net_replies=" << state.modelRepliesReceived.load()
+@@ -875,10 +871,10 @@
+                   << " flow_steps=" << state.flowSteps.load() << '\n';
+     }
+     state.running.store(false);
+-    events.interrupt();
++    events.stop();
+     modelReplies.interrupt();
+     acquisition.join(); requests.join(); responses.join(); flow.join(); visual.join();
+-    events.close(); modelImages.close(); modelReplies.close();
++    modelImages.close(); modelReplies.close();
+     erosOutput.close(); overlayOutput.close(); skeletonOutput.close();
+     velocityOutput.close(); movenetSkeletonOutput.close();
+     ofkSkeletonOutput.close();
+diff --git a/config/moveEnetOFK.env b/config/moveEnetOFK.env
+--- a/config/moveEnetOFK.env
++++ b/config/moveEnetOFK.env
+@@ -17,9 +17,9 @@
+ MUV=0.97
+ USE_LC=true
+ 
+-# Event-domain denoising, applied BEFORE EROS and SAE (does not alter raw:o).
+-# Start with 1ms same-polarity refractory and 5ms support from a neighboring
+-# pixel (radius=1). Set NOISE_FILTER=false for an A/B raw-vs-filtered test.
++# Use event-driven::vNoiseFilter before EROS and SAE (raw:o stays untouched).
++# Its spatial stage includes the center pixel; temporal suppression can help
++# with repeatedly firing pixels. Set NOISE_FILTER=false for an A/B test.
+ NOISE_FILTER=true
+ NOISE_REFRACTORY_MS=1.0
+ NOISE_SPATIAL_MS=5.0
+diff --git a/docs/MoveEnetOFK-Online.md b/docs/MoveEnetOFK-Online.md
+--- a/docs/MoveEnetOFK-Online.md
++++ b/docs/MoveEnetOFK-Online.md
+@@ -178,44 +178,53 @@
+ 7. **Do not connect the filtered skeleton to motor-control commands** before
+    timestamp, pose validity, confidence, and coordinate-frame tests pass.
+ 
+-## Configurable event denoising (November 2026)
+-
+-The C++ module optionally filters the camera event stream **before** updating
+-both EROS (MoveEnet input) and SAE (optical flow). The original
+-`/primi-ball-balance/eventCam/<camera>/raw:o` stream remains unchanged.
+-
+-Parameters in `config/moveEnetOFK.env`:
+-
+-| Setting | Initial value | Meaning |
+-| --- | --- | --- |
+-| `NOISE_FILTER` | `true` | Enable/disable filtering, including for A/B comparisons. |
+-| `NOISE_REFRACTORY_MS` | `1.0` | Reject same-polarity events at the same pixel within this interval. Set `0` to disable this stage. |
+-| `NOISE_SPATIAL_MS` | `5.0` | Require an event at a **different neighboring pixel** within the preceding interval. Set `0` to disable this stage. |
+-| `NOISE_RADIUS` | `1` | Neighbor radius in pixels; allowed range `1..3`. |
+-
+-The spatial stage excludes the center pixel to prevent an isolated hot pixel
+-from supporting its own repeated events. Both stages update their temporal
+-history even when events are rejected, allowing a neighboring event to
+-subsequently provide spatial support. This is a **causal event filter**, not an
+-image blur. It affects the inference input and optical-flow SAE, so joint
+-tracking must be re-validated with and without filtering.
+-
+-At startup the C++ module logs the chosen settings. Every five seconds
+-`[stats]` reports `raw_events`, `events_used`, `noise_refractory`,
+-`noise_spatial`, and `invalid`; they are cumulative counts. The intended
+-accounting is `raw_events = events_used + noise_refractory + noise_spatial`.
+-An event outside the configured sensor bounds increments `invalid` and is
+-excluded from `raw_events`.
+-
+-**Timing warning:** when the installed event-driven library was built without
+-individual AE timestamps, the filter and SAE use packet-level timestamps.
+-The spatial/refractory windows then have only packet-level precision; test
+-tracking quality before using filtered joint outputs for robot control.
+-
+-To compare behavior, run once with `NOISE_FILTER=false`, then with
+-`NOISE_FILTER=true`, keeping other settings unchanged. Stop the existing
+-pipeline cleanly (Ctrl+C) before each restart. Do not restart the remote
+-`zynqGrabber` solely to change these software filters.
++## Event filtering and input window (native event-driven APIs)
++
++The C++ acquisition input uses `ev::window<ev::AE>` from `event-driven/core.h`.
++A `readAll(true)` call consumes all newly arrived packets in a window, as in
++EDPR-APRIL. In contrast to the original EDPR-APRIL implementation, PRIMI uses
++`window::iterator::timestamp()` and `packetID()` to group consecutive events
++by their source packet, preserving packet-level timestamps instead of assigning
++the last window timestamp to every event. If consecutive packets have identical
++stamps they cannot be distinguished by this method. The upstream
++`eventCam_reader` and its YARP output port are unchanged.
++
++Event denoising uses **`ev::vNoiseFilter`**, from
++`event-driven/vis/filters.h`; there is no local filter implementation.
++The filter is initialized once for `WIDTH x HEIGHT`, and its temporal and
++spatial stages are enabled independently if their configured windows are
++strictly positive:
++
++| Setting | Meaning |
++| --- | --- |
++| `NOISE_FILTER` | Enable/disable the native filter |
++| `NOISE_REFRACTORY_MS` | Native temporal check window; 0 disables it |
++| `NOISE_SPATIAL_MS` | Native spatial coincidence window; 0 disables it |
++| `NOISE_RADIUS` | Native spatial neighborhood radius in pixels |
++
++The upstream native spatial filter **includes the current pixel** in its
++neighborhood search and records timestamps for rejected events. It is not
++identical to the previous project-local filter (which excluded the center).
++This matters when repeatedly firing hot pixels are present. The native
++`check()` method returns only an accept/reject boolean, so statistics report
++`noise_rejected`, not separate temporal and spatial rejection reasons.
++`raw_events = events_used + noise_rejected` counts only events with valid
++coordinates, while `invalid` is tracked separately.
++
++Filtering runs outside `surfacesMutex`. The accepted events are applied to
++EROS and SAE under the existing surface mutex **one source packet at a time**,
++not while holding the lock across the entire `readAll()` window. MoveEnet,
++optical flow, and the visualizer still take synchronized surface snapshots.
++
++**Timestamp limitation:** with `VLIB_ENABLE_TS=OFF`, the native filter and
++SAE use packet timestamps, not individual event timestamps. This affects
++fine temporal windows and optical-flow accuracy. It is not fixed by changing
++input port types.
++
++**Validation:** compare `NOISE_FILTER=false` and `true` at the same scene.
++Changing the filter implementation changes accepted-event statistics and can
++change HPE results. The new acquisition input preserves camera handling and
++all existing pose and overlay output port names.
+ 
+ ## Simultaneous MoveEnet vs OF+KF visualization (November 2026)
+ 

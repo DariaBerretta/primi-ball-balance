@@ -71,8 +71,9 @@ struct DisplayPacket {
     std::vector<DisplayEvent> events;
 };
 
+// Classs window - no redundant copied of data
 struct Camera {
-    ev::BufferedPort<ev::AE> input;
+    ev::BufferedPort<ev::AE> input; //drop it
     std::thread worker;
     std::atomic<bool> running{false};
     std::atomic<int> kernel{7}, decayMilli{300}, mode{0}, windowMs{30};
@@ -97,7 +98,7 @@ struct Camera {
         tos.init(width, height, currentKernel, 2.0);
         filter = ev::vNoiseFilter();
         filter.initialise(width, height);
-        filter.use_spatial_filter(0.005, 1);
+        filter.use_spatial_filter(0.001, 1);
         lastEventTime = 0;
     }
 
@@ -145,19 +146,23 @@ struct Camera {
                         reset();
                     }
                     std::size_t i = 0;
+                    std::cout << noise << " " << packetTime - floor(packetTime) << std::endl;
                     for (const auto& e : *packet) {
                         const int x = e.x, y = e.y;
+                        double t = packetTime;
+                        ++seen;
                         if (x < 0 || x >= width || y < 0 || y >= height) continue;
+                        if (noise && !filter.check(x, y, e.p, t)) continue;
                         if (i++ % stride == 0)
                             display.events.push_back({static_cast<uint16_t>(x),
                                 static_cast<uint16_t>(y), bool(e.p)});
-                        ++seen;
-                        double t = packetTime;
+                        
+                        
                         if (ev::ts_status) {
                             const double age = ev::deltaS(lastTick, static_cast<int>(e.ts));
                             if (age >= 0 && age < 2.0) t -= age;
                         }
-                        if (noise && !filter.check(x, y, e.p, t)) continue;
+                        
                         ++kept;
                         lastEventTime = std::max(lastEventTime, t);
                         if (m == 0) eros.update(x, y);
@@ -221,7 +226,8 @@ struct Camera {
                         pixel = cv::Vec3b(255, 255, 255);
                 }
             if (currentMode == 0) {
-                eros.getSurface().convertTo(processed, CV_8U, 255.0);
+                // eros.getSurface().convertTo(processed, CV_8U, 255.0);
+                eros.getSurface().convertTo(processed, CV_8U);
             } else if (currentMode == 1) {
                 // SAE is a timestamp surface; only its DISPLAY mapping uses
                 // exponential temporal decay. This does not modify ev::SAE.
@@ -488,8 +494,8 @@ public:
                                       {sensitivity[1]->value(), refractory[1]->value()}};
             apply->setEnabled(false);
             pending = std::async(std::launch::async, [this, values] {
-                if (!yarp::os::Network::connect(rpc.getName(), "/zynqGrabber/control/rpc"))
-                    return QString("Camera RPC unavailable; check Ultrascale zynqGrabber.");
+                if (!yarp::os::Network::connect(rpc.getName(), "/primi-ball-balance/cameraControl/rpc"))
+                    return QString("Camera RPC unavailable; check camera_control on Ultrascale.");
                 int accepted = 0;
                 for (int s = 0; s < 2; ++s)
                     for (int p = 0; p < 2; ++p) {

@@ -1,105 +1,165 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="/primi-ball-balance/skin/right_hand/compensated:o"
-DUMPER="/record/touch/$$"
-touch_pid=""
-dumper_pid=""
+usage() {
+    printf 'Usage: %s [--bma400] [TOUCH_LAUNCHER]\n' "${0##*/}"
+}
 
-cleanup() {
-    for pid in "$dumper_pid" "$touch_pid"; do
-        if [[ -n "$pid" ]]; then
+with_bma400=false
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --bma400) with_bma400=true; shift ;;
+esac
+if (( $# > 1 )) || [[ "${1:-}" == -* ]]; then
+    usage >&2
+    exit 2
+fi
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+touch_launcher="${1:-$PROJECT_DIR/run_touch.sh}"
+touch_source="${RIGHT_COMPENSATED_SOURCE:-/icub/skin/right_hand_comp}"
+sources=("$touch_source")
+stream_names=(touch)
+if "$with_bma400"; then
+    if [[ -z "${BMA400_YARP_PORT:-}" ]]; then
+        BMA400_YARP_PORT="$(
+            source "$PROJECT_DIR/config/bma400.env"
+            printf '%s' "$BMA400_YARP_PORT"
+        )"
+    fi
+    sources+=("$BMA400_YARP_PORT")
+    stream_names+=(bma400)
+fi
+
+for command in yarp yarpdatadumper timeout; do
+    command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
+done
+
+launcher_pids=()
+dumper_pids=()
+dumper_ports=()
+connected=0
+
+port_exists() {
+    timeout 2 yarp exists "$1" >/dev/null 2>&1
+}
+
+wait_for_port() {
+    local port="$1" pid="$2"
+    local deadline=$((SECONDS + $3))
+    while (( SECONDS < deadline )) && kill -0 "$pid" 2>/dev/null; do
+        if port_exists "$port"; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    printf 'Failed to open %s (process %s). Check its output above.\n' "$port" "$pid" >&2
+    return 1
+}
+
+stop_dumpers() {
+    local ok=0 i pid attempt
+    for ((i = 0; i < connected; ++i)); do
+        timeout 3 yarp disconnect "${sources[i]}" "${dumper_ports[i]}" >/dev/null 2>&1 || ok=1
+    done
+    connected=0
+
+    for i in "${!dumper_pids[@]}"; do
+        pid="${dumper_pids[i]}"
+        if ! kill -0 "$pid" 2>/dev/null ||
+           ! printf 'quit\n' | timeout 3 yarp rpc "${dumper_ports[i]}/rpc" >/dev/null 2>&1; then
+            printf 'Could not stop the %s dumper cleanly.\n' "${stream_names[i]}" >&2
             kill -TERM "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
+            ok=1
         fi
     done
-    dumper_pid=""
-    touch_pid=""
+    for i in "${!dumper_pids[@]}"; do
+        pid="${dumper_pids[i]}"
+        for ((attempt = 0; attempt < 50; ++attempt)); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.2
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            printf '%s dumper did not exit; its log may be incomplete.\n' "${stream_names[i]}" >&2
+            kill -KILL "$pid" 2>/dev/null || true
+            ok=1
+        fi
+        wait "$pid" || ok=1
+    done
+    dumper_pids=()
+    return "$ok"
+}
+
+cleanup() {
+    stop_dumpers || true
+    if (( ${#launcher_pids[@]} )); then
+        kill -TERM "${launcher_pids[@]}" 2>/dev/null || true
+        wait "${launcher_pids[@]}" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-wait_for_port() {
-    until yarp exists "$1" >/dev/null 2>&1; do
-        kill -0 "$2" 2>/dev/null || { echo "Failed to open $1" >&2; exit 1; }
-        sleep 0.2
-    done
-}
-
-# Reuse the existing touch stream; otherwise start your launcher.
-if ! yarp exists "$SOURCE" >/dev/null 2>&1; then
-    bash "${1:-$PROJECT_DIR/run_touch.sh}" &
-    touch_pid=$!
-    wait_for_port "$SOURCE" "$touch_pid"
+if ! port_exists "$touch_source"; then
+    bash "$touch_launcher" &
+    launcher_pids+=("$!")
+    wait_for_port "$touch_source" "$!" 75
+fi
+if "$with_bma400" && ! port_exists "${sources[1]}"; then
+    bash "$PROJECT_DIR/run_bma400.sh" --yarp-port "${sources[1]}" &
+    launcher_pids+=("$!")
+    wait_for_port "${sources[1]}" "$!" 20
 fi
 
-while true; do
-    read -r -p "Type yes to start recording: " command || exit 0
-    [[ "$command" == "yes" ]] && break
+while read -r -p "Type yes to start recording: " answer; do
+    [[ "$answer" == yes ]] && break
+done
+[[ "${answer:-}" == yes ]] || exit 0
+
+output_root="$PROJECT_DIR/data"
+mkdir -p "$output_root"
+session="$(mktemp -d "$output_root/touch_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
+cd "$session"
+echo "Session directory: $session"
+
+for i in "${!sources[@]}"; do
+    port="/primi-ball-balance/record/${HOSTNAME:-localhost}/${session##*/}/${stream_names[i]}"
+    dumper_ports+=("$port")
+    # Both dumpers timestamp reception using the recording PC's system clock.
+    env -u YARP_CLOCK yarpdatadumper --name "$port" --type bottle \
+        --dir "${stream_names[i]}" --txTime --rxTime &
+    dumper_pids+=("$!")
 done
 
-OUTPUT="touch_$(date +%Y%m%d_%H%M%S)_$$"
-yarpdatadumper --name "$DUMPER" --type bottle --dir "$OUTPUT" &
-dumper_pid=$!
-wait_for_port "$DUMPER" "$dumper_pid"
-yarp connect "$SOURCE" "$DUMPER" tcp
-
-echo "Recording in $PWD/$OUTPUT"
-while true; do
-    read -r -p "Type stop to finish: " command || break
-    [[ "$command" == "stop" ]] && break
+for i in "${!sources[@]}"; do
+    wait_for_port "${dumper_ports[i]}" "${dumper_pids[i]}" 10
+    wait_for_port "${dumper_ports[i]}/rpc" "${dumper_pids[i]}" 10
+done
+for i in "${!sources[@]}"; do
+    if ! timeout 5 yarp connect "${sources[i]}" "${dumper_ports[i]}" tcp; then
+        printf 'Could not connect %s. Recording incomplete. Check %s\n' "${sources[i]}" "$session" >&2
+        exit 1
+    fi
+    connected=$((connected + 1))
 done
 
-# Wait for the dumper to finish saving before reading data.log.
-cleanup
-python3 - "$OUTPUT/data.log" <<'PY'
-import sys
-from pathlib import Path
-import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+echo "Recording ${stream_names[*]}."
+while read -r -p "Type stop to finish: " answer; do
+    [[ "$answer" == stop ]] && break
+done
 
-log = Path(sys.argv[1])
-if log.stat().st_size == 0:
-    sys.exit("No samples recorded; no plot created.")
-
-with log.open() as f:
-    data = np.loadtxt((line.replace("(", " ").replace(")", " ") for line in f), ndmin=2)
-time = data[:, 1] - data[0, 1]  # packet ID, timestamp, then taxel values
-taxels = data[:, 2:]
-
-# Standard 192-channel iCub hand layout; IDs are zero-based.
-# Edit these groups if your robot uses a different mapping.
-AREAS = {
-    "Thumb": range(48, 60),
-    "Index": range(0, 12),
-    "Middle": range(12, 24),
-    "Ring": range(24, 36),
-    "Little": range(36, 48),
-    "Palm": range(96, 144),
-}
-if taxels.shape[1] != 192:
-    sys.exit(f"Expected 192 hand channels, found {taxels.shape[1]}; check the layout.")
-
-fig, axes = plt.subplots(3, 2, figsize=(13, 10), sharex=True, sharey=True,
-                         constrained_layout=True)
-for ax, (area, ids) in zip(axes.flat, AREAS.items()):
-    norm = plt.Normalize(ids[0], ids[-1])
-    for i in ids:
-        ax.plot(time, taxels[:, i], color=plt.cm.viridis(norm(i)), linewidth=0.8,
-                marker="." if len(time) == 1 else None)
-    ax.set_title(area)
-    ax.grid(alpha=0.25)
-    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap="viridis"), ax=ax,
-                 label="Taxel ID", ticks=[ids[0], ids[-1]])
-fig.suptitle("Right-hand touch — one trace per taxel")
-fig.supxlabel("Time since first sample (s)")
-fig.supylabel("Compensated taxel value (a.u.)")
-output = log.with_name("taxels_by_area.png")
-fig.savefig(output, dpi=180)
-plt.close(fig)
-print(f"Saved plot: {output.resolve()}")
-PY
+result=0
+stop_dumpers || result=1
+for stream in "${stream_names[@]}"; do
+    if [[ ! -s "$stream/data.log" ]]; then
+        printf 'No samples saved for %s.\n' "$stream" >&2
+        result=1
+    fi
+done
+if (( result )); then
+    printf 'Recording incomplete. Check %s\n' "$session" >&2
+else
+    printf 'Recording saved in %s\n' "$session"
+fi
+exit "$result"
