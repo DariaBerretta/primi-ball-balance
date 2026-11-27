@@ -20,7 +20,7 @@ if (( $# != 0 )); then
 fi
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RELAY_EXECUTABLE="${RELAY_EXECUTABLE:-$PROJECT_DIR/build/event_relay}"
+RELAY_EXECUTABLE="${RELAY_EXECUTABLE:-$PROJECT_DIR/build/event_relay}" # Built cpp executable that reads from the remote event-camera ports and writes to local YARP ports.
 
 REMOTE_RUN_SERVER="${REMOTE_RUN_SERVER:-/icub-ultrascale}"
 REMOTE_SSH_HOST="${REMOTE_SSH_HOST:-icub@icub-ultrascale}"
